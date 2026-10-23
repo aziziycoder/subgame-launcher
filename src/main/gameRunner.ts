@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, execSync } from 'child_process';
+import { spawn, ChildProcess, execSync, execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
@@ -24,6 +24,76 @@ interface RunningGameSession {
 }
 
 const activeSessions = new Map<string, RunningGameSession>();
+
+/**
+ * Windows jarayonini tekshirish (tasklist orqali)
+ */
+export function isProcessRunning(pattern: string): boolean {
+  if (!pattern) return false;
+  try {
+    const output = execFileSync('tasklist', ['/nh', '/fi', `imagename eq ${pattern}*`], {
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return output.toLowerCase().includes(pattern.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Mustaqil fon jarayoni (Detached Watcher)
+ * Launcher yopilsa ham, o'yin jarayoni tugashi bilan subtitr faylini xavfsiz o'chiradi
+ */
+export function spawnDetachedCleanupWatcher(
+  pattern: string,
+  destFilePath: string,
+  backupFilePath?: string
+): void {
+  try {
+    const escapedDest = destFilePath.replace(/'/g, "''");
+    const escapedBak = (backupFilePath || '').replace(/'/g, "''");
+    const escapedPattern = pattern.replace(/'/g, "''");
+
+    const psCommand = `
+      $pattern = '${escapedPattern}';
+      $dest = '${escapedDest}';
+      $bak = '${escapedBak}';
+      $t = 0;
+      while (!(Get-Process -Name $pattern* -ErrorAction SilentlyContinue) -and $t -lt 30) {
+        Start-Sleep -Seconds 1;
+        $t++;
+      };
+      while (Get-Process -Name $pattern* -ErrorAction SilentlyContinue) {
+        Start-Sleep -Seconds 2;
+      };
+      Start-Sleep -Seconds 1;
+      for ($i = 0; $i -lt 15; $i++) {
+        try {
+          if ($bak -and (Test-Path -LiteralPath $bak)) {
+            Copy-Item -LiteralPath $bak -Destination $dest -Force;
+            Remove-Item -LiteralPath $bak -Force;
+          } elseif (Test-Path -LiteralPath $dest) {
+            Remove-Item -LiteralPath $dest -Force;
+          }
+          break;
+        } catch {
+          Start-Sleep -Seconds 1;
+        }
+      }
+    `.replace(/\\s+/g, ' ').trim();
+
+    const watcher = spawn('powershell', ['-WindowStyle', 'Hidden', '-NoProfile', '-Command', psCommand], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    watcher.unref();
+  } catch (err) {
+    console.warn('Detached watcher start warning:', err);
+  }
+}
 
 /**
  * Xavfsiz nusxalash (Program Files papkasida EPERM xatosi bo'lsa, UAC orqali ruxsat oladi)
@@ -368,6 +438,13 @@ export async function launchGameWithProtection(
 
     onStatusUpdate("O'yin ishga tushirilmoqda...");
 
+    // Extract process pattern (e.g. Stray from Stray.exe or Stray-Win64-Shipping.exe)
+    const rawExeName = path.basename(config.gameExePath, path.extname(config.gameExePath));
+    let processPattern = rawExeName.replace(/[-_](Win64|Win32|Shipping|x64|x86)+.*$/i, '');
+    if (processPattern.length < 3) {
+      processPattern = rawExeName;
+    }
+
     // 4. Launch Game process
     const gameProcess = spawn(config.gameExePath, [], {
       cwd: gameDir,
@@ -382,33 +459,51 @@ export async function launchGameWithProtection(
       gameId: config.gameId,
     });
 
+    // Windows mustaqil tozalovchi jarayonini ishga tushiramiz (Launcher yopilsa ham fonda ishlaydi)
+    if (shouldInject && destFilePath && destFilePath !== config.gameExePath) {
+      spawnDetachedCleanupWatcher(processPattern, destFilePath, backupFilePath);
+    }
+
     onStatusUpdate("O'yin faol va o'zbekcha subtitrlar ulandi. Maroqli hordiq!");
 
-    // 5. A-Variant DRM: O'yin yopilganda faylni asl holatiga qaytarish (himoyalash)
-    gameProcess.on('exit', () => {
-      onStatusUpdate("O'yin yakunlandi.");
+    // 5. A-Variant DRM: O'yin ichki monitori (Launcher ochiq turganda real vaqtda kuzatadi va tozalaydi)
+    let checkCount = 0;
+    let gameHasStarted = false;
 
-      if (shouldInject && destFilePath && backupFilePath && destFilePath !== config.gameExePath) {
-        try {
-          if (fs.existsSync(backupFilePath)) {
-            // Asl original faylni tiklaymiz
-            safeCopyFileSync(backupFilePath, destFilePath);
-            fs.unlinkSync(backupFilePath);
-          } else {
-            // Zaxira bo'lmagan bo'lsa, o'zbekcha faylni xavfsiz o'chiramiz
-            if (fs.existsSync(destFilePath)) {
-              safeWriteFileSync(destFilePath, Buffer.alloc(1024));
-              fs.unlinkSync(destFilePath);
-            }
-          }
-        } catch (cleanErr) {
-          console.error('Tozalashda xatolik:', cleanErr);
-        }
+    const monitorInterval = setInterval(async () => {
+      checkCount++;
+      const isRunning = isProcessRunning(processPattern);
+
+      if (isRunning) {
+        gameHasStarted = true;
       }
 
-      activeSessions.delete(config.gameId);
-      onStatusUpdate('Tayyor');
-    });
+      // O'yin ishga tushib keyin yopilsa, yoki 30 soniya ichida umuman boshlanmasa
+      if ((gameHasStarted && !isRunning) || (!gameHasStarted && checkCount > 15)) {
+        clearInterval(monitorInterval);
+        activeSessions.delete(config.gameId);
+        onStatusUpdate("O'yin yakunlandi. Subtitrlar himoyalanmoqda...");
+
+        if (shouldInject && destFilePath && destFilePath !== config.gameExePath) {
+          for (let attempt = 0; attempt < 10; attempt++) {
+            try {
+              if (backupFilePath && fs.existsSync(backupFilePath)) {
+                safeCopyFileSync(backupFilePath, destFilePath);
+                try { fs.unlinkSync(backupFilePath); } catch {}
+                break;
+              } else if (fs.existsSync(destFilePath)) {
+                fs.unlinkSync(destFilePath);
+                break;
+              }
+            } catch {
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+          }
+        }
+
+        onStatusUpdate('Tayyor');
+      }
+    }, 2000);
 
     return {
       success: true,

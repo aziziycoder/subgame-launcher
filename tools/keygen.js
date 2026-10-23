@@ -9,6 +9,8 @@ const prefixes = {
   requ: 'SUB-REQU',
   outw: 'SUB-OUTW',
   lega: 'SUB-LEGA',
+  stra: 'SUB-STRA',
+  gavc: 'SUB-GAVC',
   demo: 'SUB-DEMO',
 };
 

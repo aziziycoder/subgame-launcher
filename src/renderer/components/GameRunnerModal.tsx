@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, FolderOpen, AlertCircle, X, CheckCircle2, Loader2, Sparkles, Globe, DownloadCloud, ExternalLink } from 'lucide-react';
+import { Play, FolderOpen, AlertCircle, X, CheckCircle2, Loader2, Sparkles, Globe, DownloadCloud, ExternalLink, ShieldCheck } from 'lucide-react';
 import { LauncherGame } from '../data/launcherGames';
 
 interface GameRunnerModalProps {
@@ -234,20 +234,13 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
               <CheckCircle2 className="w-3 h-3" /> Tayyor
             </span>
           ) : (
-            <button
-              type="button"
-              onClick={handleInstallSubtitle}
-              disabled={installing || launching || !exePath}
-              className="px-2.5 py-1 text-[11px] font-semibold bg-[#2A3245] hover:bg-[#374151] text-gray-200 rounded-lg flex items-center gap-1 transition-all disabled:opacity-40 cursor-pointer"
-              title="Subtitr faylini o'yin papkasiga nusxalash"
+            <span
+              className="px-2.5 py-1 text-[11px] font-semibold bg-[#A3E635]/10 border border-[#A3E635]/25 text-[#A3E635] rounded-lg flex items-center gap-1.5"
+              title="SubGame DRM xavfsiz himoyasi: o'yin faqat Launcher orqali o'zbekcha ishlaydi va yopilganda asl holiga qaytadi"
             >
-              {installing ? (
-                <Loader2 className="w-3 h-3 animate-spin text-[#A3E635]" />
-              ) : (
-                <DownloadCloud className="w-3 h-3 text-[#A3E635]" />
-              )}
-              <span>Subtitrni joylash</span>
-            </button>
+              <ShieldCheck className="w-3.5 h-3.5 text-[#A3E635]" />
+              <span>Avtomatik DRM Himoyasi</span>
+            </span>
           )}
         </div>
 
