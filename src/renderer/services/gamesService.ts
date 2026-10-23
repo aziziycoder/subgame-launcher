@@ -66,6 +66,7 @@ export async function fetchLauncherGames(): Promise<LauncherGame[]> {
           genres: data.genres || ['Sarguzasht'],
           description: data.shortDescription || data.description || '',
           subtitleSize: data.subtitleSize || '1.5 MB',
+          price: data.subtitlePrice || data.price || 'Bepul',
           defaultExeName: data.defaultExeName || 'Game.exe',
           targetFileName: isStandalone ? undefined : (data.targetFileName || undefined),
           targetRelativeDir: isStandalone ? undefined : (data.targetRelativeDir || undefined),

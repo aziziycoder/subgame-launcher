@@ -163,9 +163,9 @@ export const GameCard: React.FC<GameCardProps> = ({
 
         {/* Footer info & Buttons */}
         <div className="pt-2.5 mt-2.5 border-t border-[#2A3245]/60 flex items-center justify-between gap-2">
-          {/* Subtitle Size */}
-          <div className="text-[10px] font-mono text-gray-400">
-            Hajm: <span className="text-gray-200">{game.subtitleSize}</span>
+          {/* Subtitle Price */}
+          <div className="text-[11px] font-semibold text-gray-400 flex items-center gap-1">
+            Narxi: <span className="text-[#A3E635] font-bold">{game.price || 'Bepul'}</span>
           </div>
 
           <div className="flex items-center gap-1.5">

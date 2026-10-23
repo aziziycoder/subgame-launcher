@@ -13,6 +13,7 @@ export interface LauncherGame {
   genres: string[];
   description: string;
   subtitleSize: string;
+  price?: string;
   defaultExeName: string;
   targetFileName?: string;
   targetRelativeDir?: string;
