@@ -396,7 +396,7 @@ export function App() {
             </button>
 
             <button
-              onClick={() => openLink('https://t.me/subgame_uz')}
+              onClick={() => openLink('https://t.me/tarjimaoyinlar')}
               className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#0B0D12] hover:bg-white/5 text-xs text-gray-300 border border-[#2A3245] hover:border-gray-400 transition-colors"
             >
               <div className="flex items-center gap-2">
