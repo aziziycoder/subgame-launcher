@@ -1,6 +1,6 @@
 {
   "name": "subgame-launcher",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "SubGame Official Desktop Launcher & DRM Security System",
   "main": "dist-electron/main/main.js",
@@ -10,6 +10,7 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:renderer": "vite build",
     "build": "npm run build:electron && npm run build:renderer",
+    "patch": "npm run build && node scripts/create-patch.js",
     "dist:win": "npm run build && electron-builder --win portable",
     "preview": "vite preview"
   },

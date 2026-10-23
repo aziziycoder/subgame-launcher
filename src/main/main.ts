@@ -57,11 +57,21 @@ function createWindow() {
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    const indexPath = path.join(__dirname, '../../dist/index.html');
-    mainWindow.loadFile(indexPath).catch(() => {
-      // If built differently
-      mainWindow?.loadURL(`file://${path.resolve(__dirname, '../dist/index.html')}`);
-    });
+    // Check if a lightweight delta patch update exists in userData
+    const userUpdateIndex = path.join(app.getPath('userData'), 'update', 'dist', 'index.html');
+    if (fs.existsSync(userUpdateIndex)) {
+      mainWindow.loadFile(userUpdateIndex).catch((err) => {
+        console.warn('Failed to load user update index, falling back to bundled:', err);
+        const indexPath = path.join(__dirname, '../../dist/index.html');
+        mainWindow?.loadFile(indexPath);
+      });
+    } else {
+      const indexPath = path.join(__dirname, '../../dist/index.html');
+      mainWindow.loadFile(indexPath).catch(() => {
+        // If built differently
+        mainWindow?.loadURL(`file://${path.resolve(__dirname, '../dist/index.html')}`);
+      });
+    }
   }
 
   mainWindow.on('closed', () => {
@@ -170,16 +180,30 @@ ipcMain.handle('open-game-folder', async (_, exePath: string) => {
   return false;
 });
 
-// IPC: Get Current App Version
+// IPC: Get Current App Version (checks for user patch version first)
 ipcMain.handle('get-app-version', () => {
+  try {
+    const userVersionFile = path.join(app.getPath('userData'), 'update', 'dist', 'version.json');
+    if (fs.existsSync(userVersionFile)) {
+      const data = JSON.parse(fs.readFileSync(userVersionFile, 'utf8'));
+      if (data && data.version) {
+        return data.version;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not read user update version:', err);
+  }
   return app.getVersion();
 });
 
-// IPC: Download Launcher Update with progress
+// IPC: Download Launcher Update with progress (Supports both .zip patch and .exe full update)
 ipcMain.handle('download-update', async (_, downloadUrl: string) => {
   try {
+    const isZip = downloadUrl.toLowerCase().includes('.zip');
     const tempDir = app.getPath('temp');
-    const destPath = path.join(tempDir, 'SubGame-Launcher-Update.exe');
+    const destPath = isZip
+      ? path.join(tempDir, 'SubGame-Launcher-Patch.zip')
+      : path.join(tempDir, 'SubGame-Launcher-Update.exe');
 
     return await new Promise<{ success: boolean; tempPath?: string; error?: string }>((resolve) => {
       function doDownload(targetUrl: string) {
@@ -230,15 +254,52 @@ ipcMain.handle('download-update', async (_, downloadUrl: string) => {
   }
 });
 
-// IPC: Apply Update & Restart into new version
+// IPC: Apply Update & Restart (Instant .zip extraction or PowerShell .exe swap)
 ipcMain.handle('apply-update', async (_, tempPath: string) => {
   try {
-    const currentExe = process.execPath;
-    const oldPid = process.pid;
-
     if (!fs.existsSync(tempPath)) {
       return { success: false, error: 'Yangilanish fayli topilmadi.' };
     }
+
+    // 1. Fast Delta Patch Update (.zip)
+    if (tempPath.toLowerCase().endsWith('.zip')) {
+      const updateDistDir = path.join(app.getPath('userData'), 'update', 'dist');
+      if (!fs.existsSync(updateDistDir)) {
+        fs.mkdirSync(updateDistDir, { recursive: true });
+      }
+
+      const { execSync } = require('child_process');
+      let extracted = false;
+
+      // Try tar.exe (native on modern Windows)
+      try {
+        execSync(`tar -xf "${tempPath}" -C "${updateDistDir}"`, { stdio: 'ignore' });
+        extracted = true;
+      } catch {
+        // Fallback to powershell Expand-Archive
+      }
+
+      if (!extracted) {
+        const escapedZip = tempPath.replace(/'/g, "''");
+        const escapedDest = updateDistDir.replace(/'/g, "''");
+        const psCmd = `Expand-Archive -LiteralPath '${escapedZip}' -DestinationPath '${escapedDest}' -Force`;
+        execSync(`powershell -NoProfile -Command "${psCmd}"`, { stdio: 'ignore' });
+      }
+
+      try { fs.unlinkSync(tempPath); } catch {}
+
+      // Fast relaunch directly into the updated UI
+      app.relaunch();
+      setTimeout(() => {
+        app.quit();
+      }, 300);
+
+      return { success: true };
+    }
+
+    // 2. Full .exe update (fallback)
+    const currentExe = process.execPath;
+    const oldPid = process.pid;
 
     const escapedTemp = tempPath.replace(/'/g, "''");
     const escapedDest = currentExe.replace(/'/g, "''");

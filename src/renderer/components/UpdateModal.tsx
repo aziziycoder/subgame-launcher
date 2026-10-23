@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, ArrowRight, DownloadCloud, Loader2, RefreshCw, X, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Sparkles, ArrowRight, DownloadCloud, Loader2, RefreshCw, X, AlertCircle, CheckCircle2, Zap } from 'lucide-react';
 import { AppUpdateInfo } from '../services/updateService';
 
 interface UpdateModalProps {
@@ -32,13 +32,16 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ currentVersion, latest
     };
   }, []);
 
+  const isPatch = Boolean(latestInfo.patchUrl);
+
   const handleStartDownload = async () => {
     setDownloading(true);
     setError(null);
     setProgress(0);
 
     try {
-      const res = await window.subgame?.downloadUpdate(latestInfo.downloadUrl);
+      const targetUrl = latestInfo.patchUrl || latestInfo.downloadUrl;
+      const res = await window.subgame?.downloadUpdate(targetUrl);
       if (res?.success && res.tempPath) {
         setDownloadedTempPath(res.tempPath);
       } else {
@@ -105,6 +108,21 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ currentVersion, latest
               <span className="text-[10px] uppercase font-bold text-[#A3E635] block">Yangi</span>
               <span className="text-xs font-mono font-bold text-[#A3E635]">v{latestInfo.version}</span>
             </div>
+          </div>
+
+          {/* Update Type Pill */}
+          <div className="flex items-center justify-between text-xs px-1">
+            <span className="text-gray-400">Yangilanish turi:</span>
+            {isPatch ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#A3E635]/15 text-[#A3E635] border border-[#A3E635]/30 text-[11px] font-bold">
+                <Zap className="w-3 h-3 fill-current" />
+                Tezkor Patch ({latestInfo.patchSize || '~950 KB'})
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/10 text-gray-300 border border-white/20 text-[11px] font-medium">
+                To‘liq yangilanish (~96 MB)
+              </span>
+            )}
           </div>
 
           {/* Changelog */}

@@ -4,6 +4,8 @@ import { db } from './firebase';
 export interface AppUpdateInfo {
   version: string;
   downloadUrl: string;
+  patchUrl?: string;
+  patchSize?: string;
   changelog: string;
   releaseDate?: string;
   minRequiredVersion?: string;
