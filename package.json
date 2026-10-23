@@ -1,0 +1,65 @@
+{
+  "name": "subgame-launcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SubGame Official Desktop Launcher & DRM Security System",
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "vite",
+    "start": "electron .",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:electron && npm run build:renderer",
+    "dist:win": "npm run build && electron-builder --win portable",
+    "preview": "vite preview"
+  },
+  "build": {
+    "appId": "uz.subgame.launcher",
+    "productName": "SubGame Launcher",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "public/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "public/subtitles",
+        "to": "subtitles",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "public/icon.ico",
+      "requestedExecutionLevel": "requireAdministrator",
+      "target": [
+        "portable"
+      ]
+    }
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "firebase": "^13.0.0",
+    "lucide-react": "^1.59.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwind-merge": "^3.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "autoprefixer": "^10.6.1",
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.5.31",
+    "tailwindcss": "^3.4.19",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.4"
+  }
+}

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Production build outputs
+dist
+dist-electron
+
+# Packaging output (win-unpacked has app.asar > 190MB which exceeds GitHub 100MB limit)
+# Note: Packaged binaries (.exe) can be uploaded to GitHub Releases
+release
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment & Local settings
+.env
+.env.local
+.env.production
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln

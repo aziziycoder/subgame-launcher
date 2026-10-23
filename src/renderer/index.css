@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    border-color: #2A3245;
+  }
+  
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: #0B0D12;
+    color: #F5F7FA;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    user-select: none;
+    overflow: hidden;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0B0D12;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #232B3B;
+    border-radius: 6px;
+    border: 1px solid #2A3245;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #A3E635;
+  }
+}
+
+/* Drag region for electron frameless window */
+.app-drag-region {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.glow-accent {
+  box-shadow: 0 0 20px -3px rgba(163, 230, 53, 0.35);
+}
+
+.text-accent-gradient {
+  background: linear-gradient(135deg, #BEF264 0%, #A3E635 60%, #65A30D 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
