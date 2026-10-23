@@ -1,14 +1,28 @@
 import React, { useState } from 'react';
-import { Minus, Square, X, Shield, Copy, Check } from 'lucide-react';
+import { Minus, Square, X, Shield, Copy, Check, Sparkles, RefreshCw } from 'lucide-react';
 
 interface TitleBarProps {
   hwidInfo: {
     formattedHwid: string;
     hwid: string;
   } | null;
+  currentVersion?: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+  checkingUpdate?: boolean;
+  onCheckUpdate?: () => void;
+  onOpenUpdateModal?: () => void;
 }
 
-export const TitleBar: React.FC<TitleBarProps> = ({ hwidInfo }) => {
+export const TitleBar: React.FC<TitleBarProps> = ({
+  hwidInfo,
+  currentVersion = '1.0.0',
+  latestVersion,
+  updateAvailable = false,
+  checkingUpdate = false,
+  onCheckUpdate,
+  onOpenUpdateModal,
+}) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopyHwid = () => {
@@ -67,8 +81,32 @@ export const TitleBar: React.FC<TitleBarProps> = ({ hwidInfo }) => {
         </div>
       )}
 
-      {/* Window Controls */}
-      <div className="flex items-center gap-0.5 app-no-drag">
+      {/* Right Actions: Update Check & Window Controls */}
+      <div className="flex items-center gap-3 app-no-drag">
+        {/* Version / Update button */}
+        {updateAvailable ? (
+          <button
+            onClick={onOpenUpdateModal}
+            title={`Yangi talqin (v${latestVersion}) mavjud! Yangilash uchun bosing.`}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#A3E635]/15 border border-[#A3E635]/40 text-[#A3E635] text-[11px] font-bold hover:bg-[#A3E635]/25 transition-all cursor-pointer animate-pulse"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#A3E635]" />
+            <span>Yangi talqin: v{latestVersion}</span>
+          </button>
+        ) : (
+          <button
+            onClick={onCheckUpdate}
+            disabled={checkingUpdate}
+            title="SubGame Launcher versiyasi. Yangilanishlarni tekshirish uchun bosing"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#141821] border border-[#2A3245] hover:border-[#A3E635]/40 text-gray-400 hover:text-gray-200 text-[11px] font-mono transition-all cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3 h-3 text-[#A3E635] ${checkingUpdate ? 'animate-spin' : ''}`} />
+            <span>v{currentVersion}</span>
+          </button>
+        )}
+
+        {/* Window Controls */}
+        <div className="flex items-center gap-0.5">
         <button
           onClick={() => handleWindow('minimize')}
           className="w-9 h-8 flex items-center justify-center text-gray-400 hover:text-white hover:bg-[#1A1F2A] transition-colors rounded"
@@ -92,5 +130,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({ hwidInfo }) => {
         </button>
       </div>
     </div>
-  );
+  </div>
+);
 };

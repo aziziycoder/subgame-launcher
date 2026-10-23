@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, session } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import https from 'https';
+import http from 'http';
+import { spawn } from 'child_process';
 import { getHardwareId } from './hwid';
 import { loadLicenseStore, activateLicense } from './license';
 import { launchGameWithProtection, injectSubtitleFile } from './gameRunner';
@@ -165,4 +168,112 @@ ipcMain.handle('open-game-folder', async (_, exePath: string) => {
     }
   }
   return false;
+});
+
+// IPC: Get Current App Version
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
+// IPC: Download Launcher Update with progress
+ipcMain.handle('download-update', async (_, downloadUrl: string) => {
+  try {
+    const tempDir = app.getPath('temp');
+    const destPath = path.join(tempDir, 'SubGame-Launcher-Update.exe');
+
+    return await new Promise<{ success: boolean; tempPath?: string; error?: string }>((resolve) => {
+      function doDownload(targetUrl: string) {
+        const client = targetUrl.startsWith('https') ? https : http;
+        const req = client.get(targetUrl, (res) => {
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            return doDownload(res.headers.location);
+          }
+          if (res.statusCode !== 200) {
+            return resolve({ success: false, error: `Server xatosi: HTTP ${res.statusCode}` });
+          }
+
+          const total = parseInt(res.headers['content-length'] || '0', 10);
+          let transferred = 0;
+
+          const fileStream = fs.createWriteStream(destPath);
+          res.on('data', (chunk) => {
+            transferred += chunk.length;
+            const percent = total > 0 ? Math.round((transferred / total) * 100) : 0;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('update-progress', { percent, transferred, total });
+            }
+          });
+
+          res.pipe(fileStream);
+
+          fileStream.on('finish', () => {
+            fileStream.close();
+            resolve({ success: true, tempPath: destPath });
+          });
+
+          fileStream.on('error', (err) => {
+            try { fs.unlinkSync(destPath); } catch {}
+            resolve({ success: false, error: err.message });
+          });
+        });
+
+        req.on('error', (err) => {
+          try { fs.unlinkSync(destPath); } catch {}
+          resolve({ success: false, error: err.message });
+        });
+      }
+
+      doDownload(downloadUrl);
+    });
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Yuklab olishda xatolik yuz berdi' };
+  }
+});
+
+// IPC: Apply Update & Restart into new version
+ipcMain.handle('apply-update', async (_, tempPath: string) => {
+  try {
+    const currentExe = process.execPath;
+    const oldPid = process.pid;
+
+    if (!fs.existsSync(tempPath)) {
+      return { success: false, error: 'Yangilanish fayli topilmadi.' };
+    }
+
+    const escapedTemp = tempPath.replace(/'/g, "''");
+    const escapedDest = currentExe.replace(/'/g, "''");
+
+    const psCommand = `
+      $oldPid = ${oldPid};
+      $temp = '${escapedTemp}';
+      $dest = '${escapedDest}';
+      Wait-Process -Id $oldPid -Timeout 15 -ErrorAction SilentlyContinue;
+      Start-Sleep -Milliseconds 800;
+      for ($i = 0; $i -lt 15; $i++) {
+        try {
+          Copy-Item -LiteralPath $temp -Destination $dest -Force;
+          Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue;
+          break;
+        } catch {
+          Start-Sleep -Seconds 1;
+        }
+      }
+      Start-Process -FilePath $dest;
+    `.replace(/\\s+/g, ' ').trim();
+
+    const child = spawn('powershell', ['-WindowStyle', 'Hidden', '-NoProfile', '-Command', psCommand], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+
+    setTimeout(() => {
+      app.quit();
+    }, 200);
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Yangilanishni qo‘llashda xatolik' };
+  }
 });

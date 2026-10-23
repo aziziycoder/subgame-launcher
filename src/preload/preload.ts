@@ -21,6 +21,10 @@ export interface SubGameApi {
   onStatusUpdate: (callback: (status: string) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
   openExternal: (url: string) => void;
+  getAppVersion: () => Promise<string>;
+  downloadUpdate: (url: string) => Promise<{ success: boolean; tempPath?: string; error?: string }>;
+  applyUpdate: (tempPath: string) => Promise<{ success: boolean; error?: string }>;
+  onUpdateProgress: (callback: (progress: { percent: number; transferred: number; total: number }) => void) => () => void;
 }
 
 const api: SubGameApi = {
@@ -40,6 +44,16 @@ const api: SubGameApi = {
   },
   windowControl: (action) => ipcRenderer.send('window-control', action),
   openExternal: (url: string) => ipcRenderer.send('open-external', url),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  downloadUpdate: (url: string) => ipcRenderer.invoke('download-update', url),
+  applyUpdate: (tempPath: string) => ipcRenderer.invoke('apply-update', tempPath),
+  onUpdateProgress: (callback) => {
+    const handler = (_: any, progress: any) => callback(progress);
+    ipcRenderer.on('update-progress', handler);
+    return () => {
+      ipcRenderer.removeListener('update-progress', handler);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld('subgame', api);

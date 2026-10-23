@@ -4,8 +4,10 @@ import { GameCard } from './components/GameCard';
 import { ActivationModal } from './components/ActivationModal';
 import { GameRunnerModal } from './components/GameRunnerModal';
 import { DeviceConnectModal } from './components/DeviceConnectModal';
+import { UpdateModal } from './components/UpdateModal';
 import { LAUNCHER_GAMES, LauncherGame } from './data/launcherGames';
 import { fetchLauncherGames } from './services/gamesService';
+import { checkForAppUpdate, AppUpdateInfo } from './services/updateService';
 import { useAuth } from './context/AuthContext';
 import {
   Gamepad2,
@@ -18,6 +20,7 @@ import {
   Info,
   Copy,
   Check,
+  CheckCircle2,
   ShieldCheck,
   Sparkles,
   LogOut,
@@ -61,6 +64,19 @@ export function App() {
 
   const [deviceBindingLoading, setDeviceBindingLoading] = useState(false);
 
+  // Auto-updater state
+  const [updateData, setUpdateData] = useState<{
+    updateAvailable: boolean;
+    currentVersion: string;
+    latestInfo?: AppUpdateInfo;
+  }>({
+    updateAvailable: false,
+    currentVersion: '1.0.0',
+  });
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [updateToast, setUpdateToast] = useState<string | null>(null);
+
   const loadData = async () => {
     if (window.subgame) {
       const hwid = await window.subgame.getHardwareId();
@@ -92,9 +108,35 @@ export function App() {
     }
   };
 
+  const handleCheckForUpdates = async (manual: boolean = false) => {
+    setCheckingUpdate(true);
+    try {
+      const res = await checkForAppUpdate();
+      setUpdateData(res);
+      if (res.updateAvailable) {
+        if (manual) {
+          setIsUpdateModalOpen(true);
+        }
+      } else {
+        if (manual) {
+          setUpdateToast(`Sizda SubGame Launcherning eng so'nggi talqini o'rnatilgan (v${res.currentVersion})`);
+          setTimeout(() => setUpdateToast(null), 4000);
+        }
+      }
+    } catch (e) {
+      if (manual) {
+        setUpdateToast("Yangilanishlarni tekshirishda xatolik yuz berdi");
+        setTimeout(() => setUpdateToast(null), 4000);
+      }
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
     loadDynamicGames();
+    handleCheckForUpdates(false);
   }, []);
 
   const copyFullHwid = () => {
@@ -179,7 +221,15 @@ export function App() {
   return (
     <div className="h-screen w-screen flex flex-col bg-[#0B0D12] text-[#F5F7FA] overflow-hidden font-sans">
       {/* Frameless Title Bar */}
-      <TitleBar hwidInfo={hwidInfo} />
+      <TitleBar
+        hwidInfo={hwidInfo}
+        currentVersion={updateData.currentVersion}
+        latestVersion={updateData.latestInfo?.version}
+        updateAvailable={updateData.updateAvailable}
+        checkingUpdate={checkingUpdate}
+        onCheckUpdate={() => handleCheckForUpdates(true)}
+        onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
+      />
 
       {/* Main Layout Body */}
       <div className="flex-1 flex overflow-hidden">
@@ -586,6 +636,25 @@ export function App() {
           onClose={cancelDevicePairing}
           onOpenBrowser={() => openPairingInBrowser(pairingCode)}
         />
+      )}
+
+      {/* Launcher Auto-Update Modal */}
+      {isUpdateModalOpen && updateData.latestInfo && (
+        <UpdateModal
+          currentVersion={updateData.currentVersion}
+          latestInfo={updateData.latestInfo}
+          onClose={() => setIsUpdateModalOpen(false)}
+        />
+      )}
+
+      {/* Update Toast Alert */}
+      {updateToast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-2 duration-300">
+          <div className="bg-[#141821] border border-[#2A3245] text-white px-4 py-3 rounded-xl shadow-modal flex items-center gap-2.5 text-xs">
+            <CheckCircle2 className="w-4 h-4 text-[#A3E635] shrink-0" />
+            <span>{updateToast}</span>
+          </div>
+        </div>
       )}
     </div>
   );

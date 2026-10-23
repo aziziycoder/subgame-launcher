@@ -58,6 +58,10 @@ export interface SubGameApi {
   onStatusUpdate: (callback: (status: string) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
   openExternal: (url: string) => void;
+  getAppVersion: () => Promise<string>;
+  downloadUpdate: (url: string) => Promise<{ success: boolean; tempPath?: string; error?: string }>;
+  applyUpdate: (tempPath: string) => Promise<{ success: boolean; error?: string }>;
+  onUpdateProgress: (callback: (progress: { percent: number; transferred: number; total: number }) => void) => () => void;
 }
 
 declare global {
