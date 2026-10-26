@@ -232,22 +232,22 @@ export function formatDownloadUrl(rawUrl: string): string {
   if (!rawUrl) return '';
   const gDriveMatch = rawUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (gDriveMatch && gDriveMatch[1]) {
-    return `https://drive.google.com/uc?export=download&id=${gDriveMatch[1]}`;
+    return `https://drive.usercontent.google.com/download?id=${gDriveMatch[1]}&export=download&confirm=t`;
   }
   const gDriveIdMatch = rawUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (gDriveIdMatch && gDriveIdMatch[1] && rawUrl.includes('drive.google.com')) {
-    return `https://drive.google.com/uc?export=download&id=${gDriveIdMatch[1]}`;
+    return `https://drive.usercontent.google.com/download?id=${gDriveIdMatch[1]}&export=download&confirm=t`;
   }
   return rawUrl;
 }
 
 /**
- * Subtitr faylini serverdan yuklab olish
+ * Subtitr faylini serverdan 0-100% progress bilan yuklab olish
  */
 export async function downloadSubtitleFile(
   rawUrl: string,
   destPath: string,
-  onStatusUpdate?: (status: string) => void
+  onStatusUpdate?: (status: any) => void
 ): Promise<void> {
   const url = formatDownloadUrl(rawUrl);
   const dir = path.dirname(destPath);
@@ -255,23 +255,78 @@ export async function downloadSubtitleFile(
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  onStatusUpdate?.("Subtitr serverdan yuklab olinmoqda...");
+  onStatusUpdate?.({
+    type: 'download-progress',
+    percent: 0,
+    transferredMb: '0.0',
+    totalMb: '...',
+    message: 'Serverga ulanmoqda...'
+  });
 
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http;
-    client.get(url, (res) => {
+    const req = client.get(url, (res) => {
+      // 301, 302, 303, 307 redirectlarni xavfsiz boshqarish
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return downloadSubtitleFile(res.headers.location, destPath, onStatusUpdate).then(resolve).catch(reject);
+        let redirectUrl = res.headers.location;
+        if (!redirectUrl.startsWith('http')) {
+          const parsedOrigin = new URL(url).origin;
+          redirectUrl = new URL(redirectUrl, parsedOrigin).href;
+        }
+        return downloadSubtitleFile(redirectUrl, destPath, onStatusUpdate).then(resolve).catch(reject);
       }
+
       if (res.statusCode !== 200) {
         return reject(new Error(`Server javobi: HTTP ${res.statusCode}`));
       }
 
+      const totalBytes = parseInt(res.headers['content-length'] || '0', 10);
+      let downloadedBytes = 0;
+      let lastReportTime = 0;
       const fileStream = fs.createWriteStream(destPath);
+
+      res.on('data', (chunk) => {
+        downloadedBytes += chunk.length;
+        const now = Date.now();
+        // UI silliq ishlashi uchun xabarlarni ~80ms oraliqda jo'natamiz
+        if (now - lastReportTime > 80 || (totalBytes > 0 && downloadedBytes >= totalBytes)) {
+          lastReportTime = now;
+          if (totalBytes > 0) {
+            const percent = Math.min(100, Math.round((downloadedBytes / totalBytes) * 100));
+            const dlMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+            const totMB = (totalBytes / (1024 * 1024)).toFixed(1);
+            onStatusUpdate?.({
+              type: 'download-progress',
+              percent,
+              transferredMb: dlMB,
+              totalMb: totMB,
+              message: `Subtitr yuklanmoqda: ${percent}% (${dlMB} MB / ${totMB} MB)`
+            });
+          } else {
+            const dlMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+            onStatusUpdate?.({
+              type: 'download-progress',
+              percent: -1,
+              transferredMb: dlMB,
+              totalMb: '?',
+              message: `Subtitr yuklanmoqda: ${dlMB} MB`
+            });
+          }
+        }
+      });
+
       res.pipe(fileStream);
 
       fileStream.on('finish', () => {
         fileStream.close();
+        const dlMB = (downloadedBytes / (1024 * 1024)).toFixed(1);
+        onStatusUpdate?.({
+          type: 'download-progress',
+          percent: 100,
+          transferredMb: dlMB,
+          totalMb: dlMB,
+          message: 'Subtitr to‘liq yuklab olindi (100%)'
+        });
         resolve();
       });
 
@@ -279,7 +334,9 @@ export async function downloadSubtitleFile(
         try { fs.unlinkSync(destPath); } catch {}
         reject(err);
       });
-    }).on('error', (err) => {
+    });
+
+    req.on('error', (err) => {
       try { fs.unlinkSync(destPath); } catch {}
       reject(err);
     });
@@ -291,7 +348,7 @@ export async function downloadSubtitleFile(
  */
 export async function injectSubtitleFile(
   config: GameLaunchConfig,
-  onStatusUpdate?: (status: string) => void
+  onStatusUpdate?: (status: any) => void
 ): Promise<{ success: boolean; message: string; targetPath?: string }> {
   try {
     if (config.skipSubtitleInjection || !config.targetSubtitleFileName || config.targetSubtitleFileName === 'none') {
@@ -395,7 +452,7 @@ export async function injectSubtitleFile(
  */
 export async function launchGameWithProtection(
   config: GameLaunchConfig,
-  onStatusUpdate: (status: string) => void
+  onStatusUpdate: (status: any) => void
 ): Promise<{ success: boolean; message: string }> {
   try {
     onStatusUpdate('Litsenziya tekshirilmoqda...');

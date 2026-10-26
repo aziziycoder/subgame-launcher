@@ -12,6 +12,8 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
   const [launching, setLaunching] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [downloadInfo, setDownloadInfo] = useState<{ transferredMb: string; totalMb: string } | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,9 +26,34 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
   }, [game.id]);
 
   useEffect(() => {
-    // Subscribe to IPC status updates
-    const unsubscribe = window.subgame?.onStatusUpdate((status) => {
-      setStatusMessage(status);
+    // Subscribe to IPC status updates (supports both text string and 0-100% progress object)
+    const unsubscribe = window.subgame?.onStatusUpdate((data: any) => {
+      if (typeof data === 'object' && data?.type === 'download-progress') {
+        setDownloadProgress(data.percent);
+        if (data.transferredMb) {
+          setDownloadInfo({
+            transferredMb: data.transferredMb,
+            totalMb: data.totalMb || '?'
+          });
+        }
+        setStatusMessage(data.message || '');
+      } else if (typeof data === 'string') {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed && parsed.type === 'download-progress') {
+            setDownloadProgress(parsed.percent);
+            if (parsed.transferredMb) {
+              setDownloadInfo({
+                transferredMb: parsed.transferredMb,
+                totalMb: parsed.totalMb || '?'
+              });
+            }
+            setStatusMessage(parsed.message || '');
+            return;
+          }
+        } catch {}
+        setStatusMessage(data);
+      }
     });
     return () => {
       unsubscribe?.();
@@ -63,7 +90,9 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     setInstalling(true);
     setError(null);
     setSuccessMessage(null);
-    setStatusMessage("Subtitr nusxalanmoqda...");
+    setDownloadProgress(null);
+    setDownloadInfo(null);
+    setStatusMessage("Subtitr tayyorlanmoqda...");
 
     try {
       const skipInjection = Boolean(game.skipSubtitleInjection || !game.targetFileName);
@@ -108,6 +137,8 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     setLaunching(true);
     setError(null);
     setSuccessMessage(null);
+    setDownloadProgress(null);
+    setDownloadInfo(null);
     setStatusMessage('Boshlanmoqda...');
 
     try {
@@ -258,7 +289,41 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
           </div>
         )}
 
-        {statusMessage && (
+        {/* Subtitle Download Progress Card (0-100%) */}
+        {downloadProgress !== null && (
+          <div className="space-y-2.5 p-4 rounded-xl bg-[#0B0D12] border border-[#2A3245] shadow-inner mb-4">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-200 flex items-center gap-2 font-medium">
+                <DownloadCloud className="w-4 h-4 text-[#A3E635] animate-bounce" />
+                <span>Subtitr serverdan yuklanmoqda...</span>
+              </span>
+              <span className="font-mono font-bold text-[#A3E635] text-sm">
+                {downloadProgress >= 0 ? `${downloadProgress}%` : 'Yuklanmoqda'}
+              </span>
+            </div>
+
+            {/* Visual Progress Bar Track */}
+            <div className="w-full h-2.5 bg-[#1A1F2A] rounded-full overflow-hidden border border-[#2A3245]/60 p-0.5">
+              <div
+                className={`h-full bg-gradient-to-r from-[#84CC16] to-[#A3E635] transition-all duration-150 rounded-full shadow-sm shadow-[#A3E635]/50 ${
+                  downloadProgress < 0 ? 'w-full animate-pulse' : ''
+                }`}
+                style={{ width: downloadProgress >= 0 ? `${downloadProgress}%` : '100%' }}
+              />
+            </div>
+
+            {downloadInfo && (
+              <div className="flex items-center justify-between text-[11px] text-gray-400 font-mono pt-0.5">
+                <span>Yuklab olish</span>
+                <span className="text-gray-300">
+                  {downloadInfo.transferredMb} MB {downloadInfo.totalMb !== '?' ? `/ ${downloadInfo.totalMb} MB` : ''}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {statusMessage && downloadProgress === null && (
           <div className="flex items-center gap-2.5 p-3 bg-[#0B0D12] border border-[#A3E635]/40 rounded-xl text-[#A3E635] text-xs mb-4">
             <Loader2 className="w-4 h-4 shrink-0 animate-spin text-[#A3E635]" />
             <span>{statusMessage}</span>
@@ -279,8 +344,21 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
             disabled={launching || installing}
             className="flex-2 py-3 px-6 rounded-xl bg-[#A3E635] hover:bg-[#84CC16] text-[#0B0D12] text-sm font-extrabold shadow-sm shadow-[#A3E635]/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
           >
-            <Play className="w-4 h-4 fill-current" />
-            {launching ? 'Ishga tushmoqda...' : 'O‘yinni Boshlash'}
+            {launching || installing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-[#0B0D12]" />
+                <span>
+                  {downloadProgress !== null && downloadProgress >= 0
+                    ? `Yuklanmoqda: ${downloadProgress}%`
+                    : 'Ishga tushmoqda...'}
+                </span>
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 fill-current" />
+                <span>O‘yinni Boshlash</span>
+              </>
+            )}
           </button>
         </div>
       </div>

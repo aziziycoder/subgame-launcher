@@ -55,7 +55,7 @@ export interface SubGameApi {
     skipSubtitleInjection?: boolean;
   }) => Promise<{ success: boolean; message: string; targetPath?: string }>;
   openGameFolder: (exePath: string) => Promise<boolean>;
-  onStatusUpdate: (callback: (status: string) => void) => () => void;
+  onStatusUpdate: (callback: (status: any) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
   openExternal: (url: string) => void;
   getAppVersion: () => Promise<string>;
