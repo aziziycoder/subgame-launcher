@@ -164,7 +164,13 @@ export function App() {
 
     // 2. Check if user already owns this game in cloudLicenses
     let cloudLic = cloudLicenses[game.id];
-    if (!cloudLic) {
+    if (!cloudLic || cloudLic.status !== 'active') {
+      const isPaid = game.price && game.price !== 'Bepul';
+      if (isPaid) {
+        openLink(`https://www.subgame.uz/games/${game.slug}`);
+        return;
+      }
+
       // Auto-claim free license
       await claimFreeLicense(game.id, game.title, game.slug);
       cloudLic = {
@@ -207,7 +213,9 @@ export function App() {
 
   const filteredGames = games.filter((game) => {
     const matchesSearch = game.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const isAct = !!cloudLicenses[game.id] || !!licenses[game.id];
+    const isAct =
+      (cloudLicenses[game.id]?.status === 'active') ||
+      (licenses[game.id]?.status === 'active');
     if (filter === 'active') return matchesSearch && isAct;
     if (filter === 'ready') return matchesSearch && game.status === 'Tayyor';
     return matchesSearch;
@@ -215,8 +223,8 @@ export function App() {
 
   const readyCount = games.filter((g) => g.status === 'Tayyor').length;
   const activeCount = user
-    ? Math.max(Object.keys(cloudLicenses).length, readyCount)
-    : Object.keys(licenses).length;
+    ? Object.values(cloudLicenses).filter((l) => l.status === 'active').length
+    : Object.values(licenses).filter((l: any) => l.status === 'active').length;
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#0B0D12] text-[#F5F7FA] overflow-hidden font-sans">
@@ -486,7 +494,10 @@ export function App() {
                       game={game}
                       cloudLicense={cloudLicenses[game.id]}
                       currentHwid={hwidInfo?.hwid}
-                      isActivated={!!cloudLicenses[game.id] || !!licenses[game.id]}
+                      isActivated={
+                        (cloudLicenses[game.id]?.status === 'active') ||
+                        (licenses[game.id]?.status === 'active')
+                      }
                       onActivate={() => handlePlayGame(game)}
                       onPlay={() => handlePlayGame(game)}
                     />

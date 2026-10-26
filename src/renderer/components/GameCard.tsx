@@ -190,13 +190,21 @@ export const GameCard: React.FC<GameCardProps> = ({
                   <Lock className="w-2.5 h-2.5" />
                   <span>Boshqa PC</span>
                 </button>
-              ) : (
+              ) : isActivated ? (
                 <button
                   onClick={() => onPlay(game)}
                   className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-[#A3E635] text-[#0B0D12] hover:bg-[#84CC16] shadow-sm shadow-[#A3E635]/25 transition-all hover:scale-105 cursor-pointer"
                 >
                   <Play className="w-3 h-3 fill-current" />
                   <span>O‘ynash</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => onActivate()}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-[#141821] text-[#A3E635] border border-[#A3E635]/40 hover:bg-[#A3E635]/15 transition-all cursor-pointer"
+                >
+                  <Sparkles className="w-2.5 h-2.5" />
+                  <span>Ulash</span>
                 </button>
               )
             ) : (
