@@ -100,8 +100,8 @@ export function saveLicenseStore(store: LicenseStore): void {
 export function validateKeyFormat(key: string): { valid: boolean; gameId?: string; error?: string } {
   const cleanKey = key.trim().toUpperCase();
   // Standard format: SUB-{GAME_PREFIX}-{4 CHARS}-{4 CHARS}
-  // e.g. SUB-INNO-7842-AB12, SUB-REQU-9912-XX44, SUB-OUTW-1234-ABCD, SUB-DEMO-0001-TEST
-  const regex = /^SUB-(INNO|REQU|OUTW|DEMO|GAME)-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+  // e.g. SUB-INNO-7842-AB12, SUB-REQU-9912-XX44, SUB-OUTW-1234-ABCD, SUB-DEMO-0001-TEST, SUB-RDR1-XXXX-XXXX
+  const regex = /^SUB-(INNO|REQU|OUTW|DEMO|GAME|RDR1|STRA|RE2R|RLPA)-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
   if (!regex.test(cleanKey)) {
     return { valid: false, error: "Litsenziya kaliti formati noto'g'ri. Namuna: SUB-INNO-8492-XK91" };
   }
@@ -112,6 +112,10 @@ export function validateKeyFormat(key: string): { valid: boolean; gameId?: strin
   if (prefix === 'REQU') gameId = 'a-plague-tale-requiem';
   if (prefix === 'OUTW') gameId = 'outward-2';
   if (prefix === 'DEMO') gameId = 'demo-game';
+  if (prefix === 'RDR1') gameId = 'red-dead-redemption';
+  if (prefix === 'STRA') gameId = 'stray';
+  if (prefix === 'RE2R') gameId = 'resident-evil-2-remake';
+  if (prefix === 'RLPA') gameId = 'rusty-lake-paradise';
 
   return { valid: true, gameId };
 }

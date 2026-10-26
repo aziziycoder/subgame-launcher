@@ -1,6 +1,6 @@
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from './firebase';
-import { LAUNCHER_GAMES, LauncherGame } from '../data/launcherGames';
+import type { LauncherGame } from '../data/launcherGames';
 
 const GAMES_COLLECTION = 'games';
 
@@ -16,8 +16,8 @@ function toAbsoluteUrl(url?: string): string {
 }
 
 /**
- * Fetch games list dynamically from Firestore for the Launcher.
- * If network fails or collection is empty, seamlessly falls back to LAUNCHER_GAMES.
+ * Fetch games list purely and dynamically from Firestore for the Launcher.
+ * 100% dynamic from the central database, no static array fallback.
  */
 export async function fetchLauncherGames(): Promise<LauncherGame[]> {
   try {
@@ -26,7 +26,6 @@ export async function fetchLauncherGames(): Promise<LauncherGame[]> {
     const snapshot = await getDocs(q);
 
     const dynamicGames: LauncherGame[] = [];
-    const seenIds = new Set<string>();
 
     if (!snapshot.empty) {
       snapshot.forEach((docSnap) => {
@@ -34,8 +33,6 @@ export async function fetchLauncherGames(): Promise<LauncherGame[]> {
         const card = toAbsoluteUrl(data.cardImage || data.cover);
         const cov = toAbsoluteUrl(data.cover || data.cardImage);
         const id = docSnap.id || data.slug;
-        seenIds.add(id);
-        if (data.slug) seenIds.add(data.slug);
 
         const isStandalone = Boolean(
           data.isStandalone ||
@@ -77,32 +74,10 @@ export async function fetchLauncherGames(): Promise<LauncherGame[]> {
       });
     }
 
-    // Merge: Include any static fallback games that are not in Firestore yet
-    for (const localGame of LAUNCHER_GAMES) {
-      if (!seenIds.has(localGame.id) && !seenIds.has(localGame.slug)) {
-        dynamicGames.push({
-          ...localGame,
-          cardImage: toAbsoluteUrl(localGame.cardImage),
-          cover: toAbsoluteUrl(localGame.cover),
-          fallbackImage: toAbsoluteUrl(localGame.fallbackImage || localGame.cardImage)
-        });
-        seenIds.add(localGame.id);
-        if (localGame.slug) seenIds.add(localGame.slug);
-      }
-    }
-
-    // Sort by releaseYear desc
-    dynamicGames.sort((a, b) => (b.releaseYear || 0) - (a.releaseYear || 0));
-
-    console.info(`[Launcher] Loaded ${dynamicGames.length} games (Firestore + Built-in).`);
+    console.info(`[Launcher] Loaded ${dynamicGames.length} games dynamically from Firestore.`);
     return dynamicGames;
   } catch (error) {
-    console.warn('[Launcher] Failed to fetch dynamic games from Firestore, using offline fallback:', error);
-    return LAUNCHER_GAMES.map(g => ({
-      ...g,
-      cardImage: toAbsoluteUrl(g.cardImage),
-      cover: toAbsoluteUrl(g.cover),
-      fallbackImage: toAbsoluteUrl(g.fallbackImage || g.cardImage)
-    }));
+    console.error('[Launcher] Failed to fetch dynamic games from Firestore:', error);
+    return [];
   }
 }

@@ -34,3 +34,14 @@ Thumbs.db
 *.ntvs*
 *.njsproj
 *.sln
+
+# Subtitles & local game assets
+subtitles/
+public/subtitles/rusty-lake-paradise/
+*.swf
+
+# Temporary tools & reverse engineering dumps
+tools/*
+!tools/keygen.js
+!tools/encrypt-pack.js
+

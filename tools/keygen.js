@@ -12,6 +12,9 @@ const prefixes = {
   stra: 'SUB-STRA',
   gavc: 'SUB-GAVC',
   demo: 'SUB-DEMO',
+  rdr1: 'SUB-RDR1',
+  re2r: 'SUB-RE2R',
+  rlpa: 'SUB-RLPA',
 };
 
 const type = (process.argv[2] || 'inno').toLowerCase();

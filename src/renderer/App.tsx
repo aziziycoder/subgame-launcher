@@ -37,8 +37,8 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'ready' | 'active'>('all');
 
-  const [games, setGames] = useState<LauncherGame[]>(LAUNCHER_GAMES);
-  const [refreshingGames, setRefreshingGames] = useState(false);
+  const [games, setGames] = useState<LauncherGame[]>([]);
+  const [refreshingGames, setRefreshingGames] = useState(true);
 
   const [selectedGameForActivation, setSelectedGameForActivation] = useState<LauncherGame | null>(null);
   const [selectedGameForPlay, setSelectedGameForPlay] = useState<LauncherGame | null>(null);
@@ -473,19 +473,30 @@ export function App() {
               </div>
 
               {/* Games Grid: Compact card grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 gap-4 pb-16">
-                {filteredGames.map((game) => (
-                  <GameCard
-                    key={game.id}
-                    game={game}
-                    cloudLicense={cloudLicenses[game.id]}
-                    currentHwid={hwidInfo?.hwid}
-                    isActivated={!!cloudLicenses[game.id] || !!licenses[game.id]}
-                    onActivate={() => handlePlayGame(game)}
-                    onPlay={() => handlePlayGame(game)}
-                  />
-                ))}
-              </div>
+              {refreshingGames && games.length === 0 ? (
+                <div className="py-24 text-center flex flex-col items-center justify-center gap-3">
+                  <RefreshCw className="w-8 h-8 text-[#A3E635] animate-spin" />
+                  <p className="text-xs text-gray-400">O‘yinlar bazadan yuklanmoqda...</p>
+                </div>
+              ) : filteredGames.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 gap-4 pb-16">
+                  {filteredGames.map((game) => (
+                    <GameCard
+                      key={game.id}
+                      game={game}
+                      cloudLicense={cloudLicenses[game.id]}
+                      currentHwid={hwidInfo?.hwid}
+                      isActivated={!!cloudLicenses[game.id] || !!licenses[game.id]}
+                      onActivate={() => handlePlayGame(game)}
+                      onPlay={() => handlePlayGame(game)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="py-20 text-center text-xs text-gray-500">
+                  O‘yinlar topilmadi
+                </div>
+              )}
             </div>
           )}
 
