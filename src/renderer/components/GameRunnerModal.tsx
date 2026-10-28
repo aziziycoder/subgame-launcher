@@ -102,6 +102,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
         targetSubtitleFileName: game.targetFileName,
         targetRelativeDir: game.targetRelativeDir,
         subtitleDownloadUrl: game.subtitleDownloadUrl,
+        subtitleVersion: game.version,
         skipSubtitleInjection: skipInjection,
         isAuthorized: true,
       });
@@ -149,6 +150,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
         targetSubtitleFileName: game.targetFileName,
         targetRelativeDir: game.targetRelativeDir,
         subtitleDownloadUrl: game.subtitleDownloadUrl,
+        subtitleVersion: game.version,
         skipSubtitleInjection: skipInjection,
         isAuthorized: true,
       });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Lock, CheckCircle2, ShieldCheck, Sparkles, Clock, Globe } from 'lucide-react';
+import { Play, Lock, CheckCircle2, ShieldCheck, Sparkles, Clock, Globe, ExternalLink } from 'lucide-react';
 import { LauncherGame } from '../data/launcherGames';
 import type { GameLicense } from '../types';
 
@@ -71,8 +71,8 @@ export const GameCard: React.FC<GameCardProps> = ({
               <Clock className="w-2.5 h-2.5" />
               <span>Tez kunda</span>
             </span>
-          ) : cloudLicense ? (
-            !cloudLicense.hwid ? (
+          ) : isActivated ? (
+            !cloudLicense?.hwid ? (
               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40">
                 <Clock className="w-2.5 h-2.5" /> 1-Qurilma
               </span>
@@ -85,13 +85,9 @@ export const GameCard: React.FC<GameCardProps> = ({
                 <Lock className="w-2.5 h-2.5" /> Boshqa PC
               </span>
             )
-          ) : isActivated ? (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-              <CheckCircle2 className="w-2.5 h-2.5" /> Faol
-            </span>
           ) : (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#A3E635]/15 text-[#A3E635] border border-[#A3E635]/30">
-              <Sparkles className="w-2.5 h-2.5" /> Bepul
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700">
+              <Lock className="w-2.5 h-2.5" /> Litsenziyasiz
             </span>
           )}
         </div>
@@ -181,30 +177,32 @@ export const GameCard: React.FC<GameCardProps> = ({
 
             {/* Action button */}
             {game.status === 'Tayyor' ? (
-              cloudLicense && cloudLicense.hwid && cloudLicense.hwid !== currentHwid ? (
+              !isActivated ? (
+                /* No license in user account: must acquire from website first */
+                <button
+                  onClick={handleOpenWebsite}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-[#141821] text-[#A3E635] border border-[#A3E635]/40 hover:bg-[#A3E635]/15 transition-all hover:scale-105 cursor-pointer shadow-sm"
+                  title="Saytga o‘tib litsenziyani faollashtiring yoki xarid qiling"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>{game.price && game.price !== 'Bepul' ? 'Sotib olish' : 'Saytdan olish'}</span>
+                </button>
+              ) : cloudLicense && cloudLicense.hwid && cloudLicense.hwid !== currentHwid ? (
                 <button
                   onClick={() => onPlay(game)}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-rose-500/15 text-rose-400 border border-rose-500/40 hover:bg-rose-500/25 transition-all cursor-pointer"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-rose-500/15 text-rose-400 border border-rose-500/40 hover:bg-rose-500/25 transition-all cursor-pointer"
                   title="Ushbu o‘yin boshqa kompyuterga bog‘langan"
                 >
                   <Lock className="w-2.5 h-2.5" />
                   <span>Boshqa PC</span>
                 </button>
-              ) : isActivated ? (
+              ) : (
                 <button
                   onClick={() => onPlay(game)}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-[#A3E635] text-[#0B0D12] hover:bg-[#84CC16] shadow-sm shadow-[#A3E635]/25 transition-all hover:scale-105 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-[#A3E635] text-[#0B0D12] hover:bg-[#84CC16] shadow-sm shadow-[#A3E635]/25 transition-all hover:scale-105 cursor-pointer"
                 >
                   <Play className="w-3 h-3 fill-current" />
                   <span>O‘ynash</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => onActivate()}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-[#141821] text-[#A3E635] border border-[#A3E635]/40 hover:bg-[#A3E635]/15 transition-all cursor-pointer"
-                >
-                  <Sparkles className="w-2.5 h-2.5" />
-                  <span>Ulash</span>
                 </button>
               )
             ) : (

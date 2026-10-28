@@ -16,6 +16,7 @@ export interface GameLaunchConfig {
   subtitleDownloadUrl?: string; // Real-time server URL for dynamically added games
   isAuthorized?: boolean;
   skipSubtitleInjection?: boolean; // For standalone games or games that don't need external subtitle injection
+  subtitleVersion?: string; // Real-time subtitle version from Firestore (e.g. "v1.1.0")
 }
 
 interface RunningGameSession {
@@ -376,15 +377,57 @@ export async function injectSubtitleFile(
     const destFilePath = path.join(destDir, targetFileName);
     const backupFilePath = path.join(destDir, `${targetFileName}.subgame_bak`);
 
-    let source = findSubtitleSource(config.gameId, targetFileName);
+    const userSubDir = path.join(app.getPath('userData'), 'subtitles', config.gameId);
+    const versionFilePath = path.join(userSubDir, 'version.txt');
 
-    // Agar lokal papkalarda topilmasa va server URL berilgan bo'lsa, yuklab olamiz
+    // Subtitr versiyasini tekshirish (Subtitle Version Auto-Updater)
+    let needsVersionUpdate = false;
+    if (config.subtitleVersion && config.subtitleDownloadUrl && config.subtitleDownloadUrl.startsWith('http')) {
+      if (fs.existsSync(versionFilePath)) {
+        try {
+          const installedVer = fs.readFileSync(versionFilePath, 'utf8').trim();
+          if (installedVer && installedVer !== config.subtitleVersion.trim()) {
+            console.info(`[Subtitle Updater] New version available for ${config.gameId}: ${config.subtitleVersion} (current: ${installedVer}). Triggering re-download.`);
+            needsVersionUpdate = true;
+          }
+        } catch {}
+      } else {
+        // Agar versiya fayli bo'lmasa lekin oldin yuklab olingan fayl bo'lsa
+        const testFile = path.join(userSubDir, targetFileName);
+        const testEnc = path.join(userSubDir, `${targetFileName}.enc`);
+        if (fs.existsSync(testFile) || fs.existsSync(testEnc)) {
+          // Versiya belgilanmagan eski kesh, yangi versiya kelgan bo'lsa yangilaymiz
+          needsVersionUpdate = true;
+        }
+      }
+
+      if (needsVersionUpdate) {
+        try {
+          const oldFile = path.join(userSubDir, targetFileName);
+          const oldEnc = path.join(userSubDir, `${targetFileName}.enc`);
+          if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
+          if (fs.existsSync(oldEnc)) fs.unlinkSync(oldEnc);
+        } catch {}
+      }
+    }
+
+    let source = needsVersionUpdate ? null : findSubtitleSource(config.gameId, targetFileName);
+
+    // Agar lokal papkalarda topilmasa yoki yangi versiya mavjud bo'lsa, serverdan yuklab olamiz
     if (!source && config.subtitleDownloadUrl && config.subtitleDownloadUrl.startsWith('http')) {
       try {
-        const userSubDir = path.join(app.getPath('userData'), 'subtitles', config.gameId);
+        if (!fs.existsSync(userSubDir)) {
+          fs.mkdirSync(userSubDir, { recursive: true });
+        }
         const downloadedFilePath = path.join(userSubDir, targetFileName);
         await downloadSubtitleFile(config.subtitleDownloadUrl, downloadedFilePath, onStatusUpdate);
         if (fs.existsSync(downloadedFilePath)) {
+          // Yangilangan versiyani saqlaymiz
+          if (config.subtitleVersion) {
+            try {
+              fs.writeFileSync(versionFilePath, config.subtitleVersion.trim(), 'utf8');
+            } catch {}
+          }
           // Fayl SubGame AES-256 bilan shifrlanganligini tekshiramiz
           let isEncrypted = false;
           try {

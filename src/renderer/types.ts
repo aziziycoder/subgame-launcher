@@ -44,6 +44,7 @@ export interface SubGameApi {
     subtitleDownloadUrl?: string;
     isAuthorized?: boolean;
     skipSubtitleInjection?: boolean;
+    subtitleVersion?: string;
   }) => Promise<{ success: boolean; message: string }>;
   installSubtitle: (config: {
     gameId: string;
@@ -53,6 +54,7 @@ export interface SubGameApi {
     subtitleDownloadUrl?: string;
     isAuthorized?: boolean;
     skipSubtitleInjection?: boolean;
+    subtitleVersion?: string;
   }) => Promise<{ success: boolean; message: string; targetPath?: string }>;
   openGameFolder: (exePath: string) => Promise<boolean>;
   onStatusUpdate: (callback: (status: any) => void) => () => void;

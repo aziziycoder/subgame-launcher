@@ -54,7 +54,6 @@ export function App() {
     openPairingInBrowser,
     signOut,
     bindDeviceToLicense,
-    claimFreeLicense,
   } = useAuth();
 
   const [deviceMismatchModal, setDeviceMismatchModal] = useState<{
@@ -163,27 +162,11 @@ export function App() {
     }
 
     // 2. Check if user already owns this game in cloudLicenses
-    let cloudLic = cloudLicenses[game.id];
+    const cloudLic = cloudLicenses[game.id];
     if (!cloudLic || cloudLic.status !== 'active') {
-      const isPaid = game.price && game.price !== 'Bepul';
-      if (isPaid) {
-        openLink(`https://www.subgame.uz/games/${game.slug}`);
-        return;
-      }
-
-      // Auto-claim free license
-      await claimFreeLicense(game.id, game.title, game.slug);
-      cloudLic = {
-        id: `${user.uid}_${game.id}`,
-        userId: user.uid,
-        userEmail: user.email || '',
-        gameId: game.id,
-        gameTitle: game.title,
-        gameSlug: game.slug,
-        status: 'active',
-        hwid: null,
-        createdAt: new Date(),
-      };
+      // User must first claim or purchase the game from the official website!
+      openLink(`https://www.subgame.uz/games/${game.slug}`);
+      return;
     }
 
     const currentHwid = hwidInfo?.hwid || 'LOCAL_HWID';
@@ -213,9 +196,7 @@ export function App() {
 
   const filteredGames = games.filter((game) => {
     const matchesSearch = game.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const isAct =
-      (cloudLicenses[game.id]?.status === 'active') ||
-      (licenses[game.id]?.status === 'active');
+    const isAct = cloudLicenses[game.id]?.status === 'active';
     if (filter === 'active') return matchesSearch && isAct;
     if (filter === 'ready') return matchesSearch && game.status === 'Tayyor';
     return matchesSearch;
@@ -494,11 +475,8 @@ export function App() {
                       game={game}
                       cloudLicense={cloudLicenses[game.id]}
                       currentHwid={hwidInfo?.hwid}
-                      isActivated={
-                        (cloudLicenses[game.id]?.status === 'active') ||
-                        (licenses[game.id]?.status === 'active')
-                      }
-                      onActivate={() => handlePlayGame(game)}
+                      isActivated={cloudLicenses[game.id]?.status === 'active'}
+                      onActivate={() => openLink(`https://www.subgame.uz/games/${game.slug}`)}
                       onPlay={() => handlePlayGame(game)}
                     />
                   ))}

@@ -35,11 +35,6 @@ interface AuthContextType {
     currentHwid: string,
     deviceName: string
   ) => Promise<{ success: boolean; message?: string }>;
-  claimFreeLicense: (
-    gameId: string,
-    gameTitle: string,
-    gameSlug: string
-  ) => Promise<{ success: boolean; message?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -215,47 +210,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const claimFreeLicense = async (
-    gameId: string,
-    gameTitle: string,
-    gameSlug: string
-  ): Promise<{ success: boolean; message?: string }> => {
-    if (!user) {
-      return { success: false, message: 'Iltimos, avval hisobingizga kiring' };
-    }
-
-    try {
-      const licenseDocId = `${user.uid}_${gameId}`;
-      const licenseRef = doc(db, 'licenses', licenseDocId);
-
-      await setDoc(
-        licenseRef,
-        {
-          id: licenseDocId,
-          userId: user.uid,
-          userEmail: user.email || '',
-          userName: user.displayName || '',
-          userPhoto: user.photoURL || '',
-          gameId,
-          gameTitle,
-          gameSlug,
-          status: 'active',
-          hwid: null,
-          boundAt: null,
-          boundDeviceName: null,
-          createdAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      return { success: true };
-    } catch (error: any) {
-      console.warn('Cloud license write skipped/failed, activating locally:', error);
-      // Seamlessly succeed so the user can play without permission errors!
-      return { success: true };
-    }
-  };
-
   return (
     <AuthContext.Provider
       value={{
@@ -269,7 +223,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         openPairingInBrowser,
         signOut,
         bindDeviceToLicense,
-        claimFreeLicense,
       }}
     >
       {children}

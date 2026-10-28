@@ -8,6 +8,7 @@ export interface GameLaunchConfigPayload {
   subtitleDownloadUrl?: string;
   isAuthorized?: boolean;
   skipSubtitleInjection?: boolean;
+  subtitleVersion?: string;
 }
 
 export interface SubGameApi {
