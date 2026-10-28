@@ -28,7 +28,8 @@ import {
   AlertCircle,
   Loader2,
   Laptop,
-  RefreshCw
+  RefreshCw,
+  Crown
 } from 'lucide-react';
 
 export function App() {
@@ -47,6 +48,7 @@ export function App() {
 
   const {
     user,
+    isAdmin,
     cloudLicenses,
     pairingCode,
     isPairing,
@@ -162,7 +164,13 @@ export function App() {
       return;
     }
 
-    // 2. Check if user already owns this game in cloudLicenses
+    // 2. VIP Admin Bypass: Admins can test and play all games immediately
+    if (isAdmin) {
+      setSelectedGameForPlay(game);
+      return;
+    }
+
+    // 3. Check if user already owns this game in cloudLicenses
     const cloudLic = cloudLicenses[game.id];
     if (!cloudLic || cloudLic.status !== 'active') {
       // User must first claim or purchase the game from the official website!
@@ -173,7 +181,7 @@ export function App() {
     const currentHwid = hwidInfo?.hwid || 'LOCAL_HWID';
     const currentDeviceName = hwidInfo?.formattedHwid || 'Ushbu kompyuter';
 
-    // 3. HWID Enforcement (1 device per account)
+    // 4. HWID Enforcement (1 device per account)
     if (cloudLic.hwid) {
       if (cloudLic.hwid !== currentHwid) {
         setDeviceMismatchModal({
@@ -191,20 +199,22 @@ export function App() {
       setDeviceBindingLoading(false);
     }
 
-    // 4. Authorized for this device! Open GameRunnerModal
+    // 5. Authorized for this device! Open GameRunnerModal
     setSelectedGameForPlay(game);
   };
 
   const filteredGames = games.filter((game) => {
     const matchesSearch = game.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const isAct = cloudLicenses[game.id]?.status === 'active';
+    const isAct = isAdmin || cloudLicenses[game.id]?.status === 'active';
     if (filter === 'active') return matchesSearch && isAct;
     if (filter === 'ready') return matchesSearch && game.status === 'Tayyor';
     return matchesSearch;
   });
 
   const readyCount = games.filter((g) => g.status === 'Tayyor').length;
-  const activeCount = user
+  const activeCount = isAdmin
+    ? games.filter((g) => g.status === 'Tayyor').length
+    : user
     ? Object.values(cloudLicenses).filter((l) => l.status === 'active').length
     : Object.values(licenses).filter((l: any) => l.status === 'active').length;
 
@@ -243,9 +253,17 @@ export function App() {
                       </div>
                     )}
                     <div className="overflow-hidden flex-1 min-w-0">
-                      <h4 className="text-xs font-bold text-white truncate leading-tight">
-                        {user.displayName || 'Foydalanuvchi'}
-                      </h4>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="text-xs font-bold text-white truncate leading-tight">
+                          {user.displayName || 'Foydalanuvchi'}
+                        </h4>
+                        {isAdmin && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-400 to-[#A3E635] text-[#0B0D12] text-[9px] font-black uppercase tracking-wider shrink-0 shadow-sm">
+                            <Crown className="w-2.5 h-2.5 fill-current" />
+                            VIP
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[10px] text-gray-400 truncate mt-0.5 leading-tight">{user.email}</p>
                     </div>
                     <button
@@ -257,12 +275,12 @@ export function App() {
                     </button>
                   </div>
                   <div className="flex items-center justify-between pt-1.5 text-[10px]">
-                    <span className="text-emerald-400 flex items-center gap-1 font-semibold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      Google hisob faol
+                    <span className={isAdmin ? "text-amber-300 flex items-center gap-1 font-bold" : "text-emerald-400 flex items-center gap-1 font-semibold"}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${isAdmin ? 'bg-amber-400' : 'bg-emerald-400'} animate-pulse`} />
+                      {isAdmin ? 'VIP Admin faol' : 'Google hisob faol'}
                     </span>
                     <span className="font-mono text-gray-400">
-                      {activeCount} ta o‘yin
+                      {isAdmin ? 'Barchasi ochiq' : `${activeCount} ta o‘yin`}
                     </span>
                   </div>
                 </div>
@@ -488,7 +506,8 @@ export function App() {
                       game={game}
                       cloudLicense={cloudLicenses[game.id]}
                       currentHwid={hwidInfo?.hwid}
-                      isActivated={cloudLicenses[game.id]?.status === 'active'}
+                      isActivated={isAdmin || cloudLicenses[game.id]?.status === 'active'}
+                      isAdmin={isAdmin}
                       onActivate={() => openLink(`https://www.subgame.uz/games/${game.slug}`)}
                       onPlay={() => handlePlayGame(game)}
                     />

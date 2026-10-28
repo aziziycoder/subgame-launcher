@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Lock, CheckCircle2, ShieldCheck, Sparkles, Clock, Globe, ExternalLink } from 'lucide-react';
+import { Play, Lock, CheckCircle2, ShieldCheck, Sparkles, Clock, Globe, ExternalLink, Crown } from 'lucide-react';
 import { LauncherGame } from '../data/launcherGames';
 import type { GameLicense } from '../types';
 
@@ -8,6 +8,7 @@ interface GameCardProps {
   cloudLicense?: GameLicense;
   currentHwid?: string;
   isActivated: boolean;
+  isAdmin?: boolean;
   onActivate: (game: LauncherGame) => void;
   onPlay: (game: LauncherGame) => void;
 }
@@ -17,6 +18,7 @@ export const GameCard: React.FC<GameCardProps> = ({
   cloudLicense,
   currentHwid,
   isActivated,
+  isAdmin,
   onActivate,
   onPlay,
 }) => {
@@ -70,6 +72,11 @@ export const GameCard: React.FC<GameCardProps> = ({
             <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
               <Clock className="w-2.5 h-2.5" />
               <span>Tez kunda</span>
+            </span>
+          ) : isAdmin ? (
+            <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/50 shadow-sm shadow-amber-500/20">
+              <Crown className="w-3 h-3 text-amber-400 fill-amber-400/40" />
+              <span>VIP Ochiq</span>
             </span>
           ) : isActivated ? (
             !cloudLicense?.hwid ? (
@@ -177,7 +184,16 @@ export const GameCard: React.FC<GameCardProps> = ({
 
             {/* Action button */}
             {game.status === 'Tayyor' ? (
-              !isActivated ? (
+              isAdmin ? (
+                <button
+                  onClick={() => onPlay(game)}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-400 to-[#A3E635] text-[#0B0D12] hover:opacity-95 shadow-md shadow-amber-400/25 transition-all hover:scale-105 cursor-pointer"
+                  title="VIP Bepul: Barcha o‘yinlar admin uchun ochiq"
+                >
+                  <Crown className="w-3.5 h-3.5 fill-current" />
+                  <span>VIP O‘ynash</span>
+                </button>
+              ) : !isActivated ? (
                 /* No license in user account: must acquire from website first */
                 <button
                   onClick={handleOpenWebsite}

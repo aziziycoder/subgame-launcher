@@ -13,15 +13,20 @@ import {
 import { db } from '../services/firebase';
 import type { GameLicense } from '../types';
 
+export const ADMIN_EMAILS = ['azizbekgulomovweb@gmail.com'];
+
 export interface LauncherUserData {
   uid: string;
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  role?: string;
+  isAdmin?: boolean;
 }
 
 interface AuthContextType {
   user: LauncherUserData | null;
+  isAdmin: boolean;
   loading: boolean;
   cloudLicenses: Record<string, GameLicense>;
   pairingCode: string | null;
@@ -54,6 +59,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [isPairing, setIsPairing] = useState(false);
   const pairingUnsubscribeRef = useRef<(() => void) | null>(null);
+
+  const userEmail = (user?.email || '').trim().toLowerCase();
+  const isAdmin = Boolean(
+    user && (
+      ADMIN_EMAILS.some((e) => e.toLowerCase() === userEmail) ||
+      user.role === 'admin' ||
+      user.isAdmin === true
+    )
+  );
 
   // Real-time Firestore sync of user licenses whenever user changes
   useEffect(() => {
@@ -214,6 +228,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         user,
+        isAdmin,
         loading,
         cloudLicenses,
         pairingCode,
