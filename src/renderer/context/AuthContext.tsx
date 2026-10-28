@@ -13,7 +13,10 @@ import {
 import { db } from '../services/firebase';
 import type { GameLicense } from '../types';
 
-export const ADMIN_EMAILS = ['azizbekgulomovweb@gmail.com'];
+export const ADMIN_EMAILS = [
+  'azizbekgulomovweb@gmail.com',
+  'imuz21029@gmail.com'
+];
 
 export interface LauncherUserData {
   uid: string;
@@ -56,16 +59,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [loading, setLoading] = useState(false);
   const [cloudLicenses, setCloudLicenses] = useState<Record<string, GameLicense>>({});
+  const [userProfile, setUserProfile] = useState<{ role?: string; isAdmin?: boolean } | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [isPairing, setIsPairing] = useState(false);
   const pairingUnsubscribeRef = useRef<(() => void) | null>(null);
+
+  // Sync user profile from Firestore users collection to detect admin role dynamically
+  useEffect(() => {
+    if (!user?.uid) {
+      setUserProfile(null);
+      return;
+    }
+
+    try {
+      const unsubscribeProfile = onSnapshot(
+        doc(db, 'users', user.uid),
+        (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setUserProfile({
+              role: data.role,
+              isAdmin: Boolean(data.isAdmin || data.role === 'admin'),
+            });
+          }
+        },
+        (err) => {
+          console.warn('User profile sync error:', err);
+        }
+      );
+
+      return () => unsubscribeProfile();
+    } catch (e) {
+      console.warn('Could not subscribe to user profile:', e);
+    }
+  }, [user?.uid]);
 
   const userEmail = (user?.email || '').trim().toLowerCase();
   const isAdmin = Boolean(
     user && (
       ADMIN_EMAILS.some((e) => e.toLowerCase() === userEmail) ||
       user.role === 'admin' ||
-      user.isAdmin === true
+      user.isAdmin === true ||
+      userProfile?.role === 'admin' ||
+      userProfile?.isAdmin === true
     )
   );
 
