@@ -22,8 +22,7 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*",
-      "public/**/*"
+      "dist-electron/**/*"
     ],
     "extraResources": [
       {
