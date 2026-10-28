@@ -32,6 +32,7 @@ export function compareVersions(a: string, b: string): number {
  */
 export async function checkForAppUpdate(): Promise<{
   updateAvailable: boolean;
+  isForceUpdate: boolean;
   currentVersion: string;
   latestInfo?: AppUpdateInfo;
 }> {
@@ -45,7 +46,10 @@ export async function checkForAppUpdate(): Promise<{
       const data = snap.data() as AppUpdateInfo;
       if (data && data.version) {
         const updateAvailable = compareVersions(data.version, currentVersion) > 0;
-        return { updateAvailable, currentVersion, latestInfo: data };
+        const isForceUpdate = Boolean(
+          data.minRequiredVersion && compareVersions(data.minRequiredVersion, currentVersion) > 0
+        );
+        return { updateAvailable, isForceUpdate, currentVersion, latestInfo: data };
       }
     }
   } catch (err) {
@@ -59,12 +63,15 @@ export async function checkForAppUpdate(): Promise<{
       const data = (await res.json()) as AppUpdateInfo;
       if (data && data.version) {
         const updateAvailable = compareVersions(data.version, currentVersion) > 0;
-        return { updateAvailable, currentVersion, latestInfo: data };
+        const isForceUpdate = Boolean(
+          data.minRequiredVersion && compareVersions(data.minRequiredVersion, currentVersion) > 0
+        );
+        return { updateAvailable, isForceUpdate, currentVersion, latestInfo: data };
       }
     }
   } catch (netErr) {
     console.warn('[UpdateService] Fallback check failed:', netErr);
   }
 
-  return { updateAvailable: false, currentVersion };
+  return { updateAvailable: false, isForceUpdate: false, currentVersion };
 }

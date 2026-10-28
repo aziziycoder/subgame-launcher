@@ -5,10 +5,16 @@ import { AppUpdateInfo } from '../services/updateService';
 interface UpdateModalProps {
   currentVersion: string;
   latestInfo: AppUpdateInfo;
+  isForceUpdate?: boolean;
   onClose: () => void;
 }
 
-export const UpdateModal: React.FC<UpdateModalProps> = ({ currentVersion, latestInfo, onClose }) => {
+export const UpdateModal: React.FC<UpdateModalProps> = ({
+  currentVersion,
+  latestInfo,
+  isForceUpdate = false,
+  onClose,
+}) => {
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [transferredMb, setTransferredMb] = useState('0');
@@ -77,15 +83,23 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({ currentVersion, latest
         {/* Header */}
         <div className="p-5 border-b border-[#2A3245] flex items-center justify-between bg-[#0B0D12]/60">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#A3E635]/15 border border-[#A3E635]/30 text-[#A3E635] flex items-center justify-center">
-              <Sparkles className="w-5 h-5" />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+              isForceUpdate 
+                ? 'bg-rose-500/20 border border-rose-500/40 text-rose-400' 
+                : 'bg-[#A3E635]/15 border border-[#A3E635]/30 text-[#A3E635]'
+            }`}>
+              {isForceUpdate ? <AlertCircle className="w-5 h-5 text-rose-400" /> : <Sparkles className="w-5 h-5" />}
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Yangi talqin mavjud!</h3>
-              <p className="text-xs text-gray-400">SubGame Launcher avtomatik yangilanishi</p>
+              <h3 className="text-base font-bold text-white">
+                {isForceUpdate ? 'Majburiy Yangilanish!' : 'Yangi talqin mavjud!'}
+              </h3>
+              <p className="text-xs text-gray-400">
+                {isForceUpdate ? 'Xavfsizlik va barqarorlik uchun yangilash shart' : 'SubGame Launcher avtomatik yangilanishi'}
+              </p>
             </div>
           </div>
-          {!downloading && !applying && (
+          {!isForceUpdate && !downloading && !applying && (
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-[#1A202C] transition-colors"

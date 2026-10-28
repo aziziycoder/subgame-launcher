@@ -1,6 +1,6 @@
 {
   "name": "subgame-launcher",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "description": "SubGame Official Desktop Launcher & DRM Security System",
   "main": "dist-electron/main/main.js",

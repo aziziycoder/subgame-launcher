@@ -69,10 +69,12 @@ export function App() {
   // Auto-updater state
   const [updateData, setUpdateData] = useState<{
     updateAvailable: boolean;
+    isForceUpdate: boolean;
     currentVersion: string;
     latestInfo?: AppUpdateInfo;
   }>({
     updateAvailable: false,
+    isForceUpdate: false,
     currentVersion: '1.0.0',
   });
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -116,7 +118,7 @@ export function App() {
       const res = await checkForAppUpdate();
       setUpdateData(res);
       if (res.updateAvailable) {
-        if (manual) {
+        if (res.isForceUpdate || manual) {
           setIsUpdateModalOpen(true);
         }
       } else {
@@ -158,6 +160,12 @@ export function App() {
   };
 
   const handlePlayGame = async (game: LauncherGame) => {
+    // 0. Force Update Check: If launcher is outdated, block playing
+    if (updateData.isForceUpdate) {
+      setIsUpdateModalOpen(true);
+      return;
+    }
+
     // 1. If not logged in, prompt Device Pairing via Website
     if (!user) {
       await startDevicePairing();
@@ -675,7 +683,12 @@ export function App() {
         <UpdateModal
           currentVersion={updateData.currentVersion}
           latestInfo={updateData.latestInfo}
-          onClose={() => setIsUpdateModalOpen(false)}
+          isForceUpdate={updateData.isForceUpdate}
+          onClose={() => {
+            if (!updateData.isForceUpdate) {
+              setIsUpdateModalOpen(false);
+            }
+          }}
         />
       )}
 
