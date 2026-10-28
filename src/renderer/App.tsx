@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   ShieldCheck,
   Sparkles,
+  HeartHandshake,
   LogOut,
   AlertCircle,
   Loader2,
@@ -393,6 +394,18 @@ export function App() {
                 <span>Telegram Kanal</span>
               </div>
               <ExternalLink className="w-3 h-3 text-gray-500" />
+            </button>
+
+            <button
+              onClick={() => openLink('https://taps.uz/subgame')}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-xs text-amber-300 border border-amber-500/30 hover:border-amber-400 transition-all font-semibold shadow-sm"
+              title="Loyihani qo‘llab-quvvatlash (Donat - taps.uz/subgame)"
+            >
+              <div className="flex items-center gap-2">
+                <HeartHandshake className="w-3.5 h-3.5 text-amber-400" />
+                <span>Donat (taps.uz)</span>
+              </div>
+              <ExternalLink className="w-3 h-3 text-amber-400/70" />
             </button>
           </div>
         </aside>

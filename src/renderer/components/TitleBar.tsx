@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Minus, Square, X, Shield, Copy, Check, Sparkles, RefreshCw } from 'lucide-react';
+import { Minus, Square, X, Shield, Copy, Check, Sparkles, RefreshCw, HeartHandshake } from 'lucide-react';
 
 interface TitleBarProps {
   hwidInfo: {
@@ -82,7 +82,23 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       )}
 
       {/* Right Actions: Update Check & Window Controls */}
-      <div className="flex items-center gap-3 app-no-drag">
+      <div className="flex items-center gap-2.5 app-no-drag">
+        {/* Donate Button */}
+        <button
+          onClick={() => {
+            if (window.subgame?.openExternal) {
+              window.subgame.openExternal('https://taps.uz/subgame');
+            } else {
+              window.open('https://taps.uz/subgame', '_blank');
+            }
+          }}
+          title="Loyihani qo‘llab-quvvatlash (Donat - taps.uz/subgame)"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/35 hover:bg-amber-500/25 text-amber-300 text-[11px] font-bold transition-all cursor-pointer shadow-sm hover:scale-105"
+        >
+          <HeartHandshake className="w-3.5 h-3.5 text-amber-400" />
+          <span>Donat</span>
+        </button>
+
         {/* Version / Update button */}
         {updateAvailable ? (
           <button
