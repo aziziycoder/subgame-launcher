@@ -34,14 +34,31 @@ export async function fetchLauncherGames(): Promise<LauncherGame[]> {
         const cov = toAbsoluteUrl(data.cover || data.cardImage);
         const id = docSnap.id || data.slug;
 
+        let targetFileName = data.targetFileName;
+        let targetRelativeDir = data.targetRelativeDir;
+        let defaultExeName = data.defaultExeName || 'Game.exe';
+        let keyPrefix = data.keyPrefix || 'SUB-GAME';
+        let status = data.subtitleStatus || data.status || 'Tayyor';
+        let subtitleSize = data.subtitleSize || '1.5 MB';
+
+        // Mafia: Definitive Edition maxsus sozlamalari (Ikkala til fayli: Rus va Ingliz lokalizatsiyasi uchun)
+        if (id === 'mafia-definitive-edition' || data.slug === 'mafia-definitive-edition') {
+          targetFileName = 'stringtable_en.sds,stringtable_ru.sds';
+          targetRelativeDir = 'sds_retail/string_tables';
+          defaultExeName = 'mafiadefinitiveedition.exe';
+          keyPrefix = 'SUB-MAFI';
+          status = 'Tayyor';
+          subtitleSize = '1.6 MB';
+        }
+
         const isStandalone = Boolean(
           data.isStandalone ||
           data.skipSubtitleInjection ||
           id === 'level-devil' ||
           data.slug === 'level-devil' ||
-          !data.targetFileName ||
-          data.targetFileName === data.defaultExeName ||
-          data.targetFileName === 'Level Devil.exe'
+          !targetFileName ||
+          targetFileName === defaultExeName ||
+          targetFileName === 'Level Devil.exe'
         );
 
         const subUrl = data.subtitleDownloadUrl && data.subtitleDownloadUrl.startsWith('http')
@@ -55,18 +72,18 @@ export async function fetchLauncherGames(): Promise<LauncherGame[]> {
           cardImage: card,
           fallbackImage: card,
           cover: cov,
-          status: data.subtitleStatus || data.status || 'Tayyor',
+          status,
           version: data.subtitleVersion || data.version || 'v1.0.0',
-          keyPrefix: data.keyPrefix || 'SUB-GAME',
+          keyPrefix,
           developer: data.developer || 'Noma‘lum',
           releaseYear: data.releaseYear || 2026,
           genres: data.genres || ['Sarguzasht'],
           description: data.shortDescription || data.description || '',
-          subtitleSize: data.subtitleSize || '1.5 MB',
+          subtitleSize,
           price: data.subtitlePrice || data.price || 'Bepul',
-          defaultExeName: data.defaultExeName || 'Game.exe',
-          targetFileName: isStandalone ? undefined : (data.targetFileName || undefined),
-          targetRelativeDir: isStandalone ? undefined : (data.targetRelativeDir || undefined),
+          defaultExeName,
+          targetFileName: isStandalone ? undefined : (targetFileName || undefined),
+          targetRelativeDir: isStandalone ? undefined : (targetRelativeDir || undefined),
           subtitleDownloadUrl: isStandalone ? undefined : subUrl,
           isStandalone,
           skipSubtitleInjection: isStandalone,

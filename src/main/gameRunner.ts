@@ -7,12 +7,17 @@ import { app } from 'electron';
 import { isGameActivated } from './license';
 import { decryptData } from './crypto';
 
+export interface InjectedFileInfo {
+  destFilePath: string;
+  backupFilePath?: string;
+}
+
 export interface GameLaunchConfig {
   gameId: string;
   gameExePath: string;
   encryptedSubtitlePath?: string;
-  targetSubtitleFileName?: string; // e.g. tt01.pc
-  targetRelativeDir?: string; // e.g. TRTEXT
+  targetSubtitleFileName?: string; // e.g. tt01.pc or "stringtable_en.sds,stringtable_ru.sds"
+  targetRelativeDir?: string; // e.g. TRTEXT or sds_retail/string_tables
   subtitleDownloadUrl?: string; // Real-time server URL for dynamically added games
   isAuthorized?: boolean;
   skipSubtitleInjection?: boolean; // For standalone games or games that don't need external subtitle injection
@@ -45,22 +50,28 @@ export function isProcessRunning(pattern: string): boolean {
 
 /**
  * Mustaqil fon jarayoni (Detached Watcher)
- * Launcher yopilsa ham, o'yin jarayoni tugashi bilan subtitr faylini xavfsiz o'chiradi
+ * Launcher yopilsa ham, o'yin jarayoni tugashi bilan subtitr faylini xavfsiz o'chiradi yoki zaxiradan tiklaydi
  */
 export function spawnDetachedCleanupWatcher(
   pattern: string,
-  destFilePath: string,
-  backupFilePath?: string
+  filesOrDest: string | InjectedFileInfo[],
+  legacyBackupPath?: string
 ): void {
   try {
-    const escapedDest = destFilePath.replace(/'/g, "''");
-    const escapedBak = (backupFilePath || '').replace(/'/g, "''");
+    const fileEntries: Array<{ dest: string; bak: string }> = Array.isArray(filesOrDest)
+      ? filesOrDest.map((f) => ({ dest: f.destFilePath, bak: f.backupFilePath || '' }))
+      : [{ dest: filesOrDest, bak: legacyBackupPath || '' }];
+
+    if (fileEntries.length === 0) return;
+
     const escapedPattern = pattern.replace(/'/g, "''");
+    const fileArrayScript = fileEntries
+      .map((f) => `@{ dest = '${f.dest.replace(/'/g, "''")}'; bak = '${f.bak.replace(/'/g, "''")}' }`)
+      .join(', ');
 
     const psCommand = `
       $pattern = '${escapedPattern}';
-      $dest = '${escapedDest}';
-      $bak = '${escapedBak}';
+      $files = @(${fileArrayScript});
       $t = 0;
       while (!(Get-Process -Name $pattern* -ErrorAction SilentlyContinue) -and $t -lt 30) {
         Start-Sleep -Seconds 1;
@@ -70,17 +81,19 @@ export function spawnDetachedCleanupWatcher(
         Start-Sleep -Seconds 2;
       };
       Start-Sleep -Seconds 1;
-      for ($i = 0; $i -lt 15; $i++) {
-        try {
-          if ($bak -and (Test-Path -LiteralPath $bak)) {
-            Copy-Item -LiteralPath $bak -Destination $dest -Force;
-            Remove-Item -LiteralPath $bak -Force;
-          } elseif (Test-Path -LiteralPath $dest) {
-            Remove-Item -LiteralPath $dest -Force;
+      foreach ($f in $files) {
+        for ($i = 0; $i -lt 15; $i++) {
+          try {
+            if ($f.bak -and (Test-Path -LiteralPath $f.bak)) {
+              Copy-Item -LiteralPath $f.bak -Destination $f.dest -Force;
+              Remove-Item -LiteralPath $f.bak -Force;
+            } elseif (Test-Path -LiteralPath $f.dest) {
+              Remove-Item -LiteralPath $f.dest -Force;
+            }
+            break;
+          } catch {
+            Start-Sleep -Seconds 1;
           }
-          break;
-        } catch {
-          Start-Sleep -Seconds 1;
         }
       }
     `.replace(/\\s+/g, ' ').trim();
@@ -164,19 +177,22 @@ export function findSubtitleSource(
 ): { path: string; isEncrypted: boolean } | null {
   const encName = `${fileName}.enc`;
 
+  const resPath = process.resourcesPath;
   // Avval shifrlangan .enc faylni qidiramiz, keyin asl faylni
   for (const f of [encName, fileName]) {
     const candidatePaths = [
       path.join(app.getPath('userData'), 'subtitles', gameId, f),
-      path.join(process.resourcesPath, 'subtitles', gameId, f),
-      path.join(process.resourcesPath, 'public', 'subtitles', gameId, f),
+      ...(resPath ? [
+        path.join(resPath, 'subtitles', gameId, f),
+        path.join(resPath, 'public', 'subtitles', gameId, f),
+        path.join(resPath, 'app.asar.unpacked', 'dist', 'subtitles', gameId, f),
+        path.join(resPath, 'app.asar.unpacked', 'public', 'subtitles', gameId, f),
+      ] : []),
       path.join(app.getAppPath(), 'dist', 'subtitles', gameId, f),
       path.join(app.getAppPath(), 'public', 'subtitles', gameId, f),
       path.join(__dirname, '../../dist/subtitles', gameId, f),
       path.join(__dirname, '../../public/subtitles', gameId, f),
       path.join(__dirname, '../subtitles', gameId, f),
-      path.join(process.resourcesPath, 'app.asar.unpacked', 'dist', 'subtitles', gameId, f),
-      path.join(process.resourcesPath, 'app.asar.unpacked', 'public', 'subtitles', gameId, f),
     ];
 
     for (const p of candidatePaths) {
@@ -356,11 +372,17 @@ export async function downloadSubtitleFile(
 
 /**
  * Subtitr faylini o'yin papkasiga xavfsiz dekodlab joylash
+ * Bir yoki bir nechta subtitr fayllarini qo'llab-quvvatlaydi (masalan, stringtable_en.sds,stringtable_ru.sds)
  */
 export async function injectSubtitleFile(
   config: GameLaunchConfig,
   onStatusUpdate?: (status: any) => void
-): Promise<{ success: boolean; message: string; targetPath?: string }> {
+): Promise<{
+  success: boolean;
+  message: string;
+  targetPath?: string;
+  injectedFiles?: InjectedFileInfo[];
+}> {
   try {
     if (config.skipSubtitleInjection || !config.targetSubtitleFileName || config.targetSubtitleFileName === 'none') {
       return {
@@ -377,15 +399,16 @@ export async function injectSubtitleFile(
     }
 
     const gameDir = path.dirname(config.gameExePath);
-    const targetFileName = config.targetSubtitleFileName;
     const destDir = resolveTargetDir(gameDir, config.targetRelativeDir);
 
     if (!fs.existsSync(destDir)) {
       fs.mkdirSync(destDir, { recursive: true });
     }
 
-    const destFilePath = path.join(destDir, targetFileName);
-    const backupFilePath = path.join(destDir, `${targetFileName}.subgame_bak`);
+    const fileNames = config.targetSubtitleFileName
+      .split(/[,;|]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
 
     const userSubDir = path.join(app.getPath('userData'), 'subtitles', config.gameId);
     const versionFilePath = path.join(userSubDir, 'version.txt');
@@ -402,105 +425,148 @@ export async function injectSubtitleFile(
           }
         } catch {}
       } else {
-        // Agar versiya fayli bo'lmasa lekin oldin yuklab olingan fayl bo'lsa
-        const testFile = path.join(userSubDir, targetFileName);
-        const testEnc = path.join(userSubDir, `${targetFileName}.enc`);
-        if (fs.existsSync(testFile) || fs.existsSync(testEnc)) {
-          // Versiya belgilanmagan eski kesh, yangi versiya kelgan bo'lsa yangilaymiz
-          needsVersionUpdate = true;
+        for (const f of fileNames) {
+          const testFile = path.join(userSubDir, f);
+          const testEnc = path.join(userSubDir, `${f}.enc`);
+          if (fs.existsSync(testFile) || fs.existsSync(testEnc)) {
+            needsVersionUpdate = true;
+            break;
+          }
         }
       }
 
       if (needsVersionUpdate) {
-        try {
-          const oldFile = path.join(userSubDir, targetFileName);
-          const oldEnc = path.join(userSubDir, `${targetFileName}.enc`);
-          if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
-          if (fs.existsSync(oldEnc)) fs.unlinkSync(oldEnc);
-        } catch {}
+        for (const f of fileNames) {
+          try {
+            const oldFile = path.join(userSubDir, f);
+            const oldEnc = path.join(userSubDir, `${f}.enc`);
+            if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile);
+            if (fs.existsSync(oldEnc)) fs.unlinkSync(oldEnc);
+          } catch {}
+        }
       }
     }
 
-    let source = needsVersionUpdate ? null : findSubtitleSource(config.gameId, targetFileName);
+    // Agar lokal papkalarda barcha fayllar topilmasa va server URL berilgan bo'lsa, yuklab olamiz
+    let allFound = !needsVersionUpdate && fileNames.every((f) => findSubtitleSource(config.gameId, f) !== null);
 
-    // Agar lokal papkalarda topilmasa yoki yangi versiya mavjud bo'lsa, serverdan yuklab olamiz
-    if (!source && config.subtitleDownloadUrl && config.subtitleDownloadUrl.startsWith('http')) {
+    if (!allFound && config.subtitleDownloadUrl && config.subtitleDownloadUrl.startsWith('http')) {
       try {
         if (!fs.existsSync(userSubDir)) {
           fs.mkdirSync(userSubDir, { recursive: true });
         }
-        const downloadedFilePath = path.join(userSubDir, targetFileName);
-        await downloadSubtitleFile(config.subtitleDownloadUrl, downloadedFilePath, onStatusUpdate);
-        if (fs.existsSync(downloadedFilePath)) {
-          // Yangilangan versiyani saqlaymiz
-          if (config.subtitleVersion) {
+
+        const isZip = config.subtitleDownloadUrl.toLowerCase().includes('.zip') || fileNames.length > 1;
+
+        if (isZip) {
+          const tempZip = path.join(userSubDir, `bundle_${Date.now()}.zip`);
+          onStatusUpdate?.("Subtitrlar arxivi serverdan yuklanmoqda...");
+          await downloadSubtitleFile(config.subtitleDownloadUrl, tempZip, onStatusUpdate);
+          if (fs.existsSync(tempZip)) {
             try {
-              fs.writeFileSync(versionFilePath, config.subtitleVersion.trim(), 'utf8');
-            } catch {}
+              execSync(`powershell -NoProfile -Command "Expand-Archive -LiteralPath '${tempZip.replace(/'/g, "''")}' -DestinationPath '${userSubDir.replace(/'/g, "''")}' -Force"`, { windowsHide: true });
+            } catch (unzipErr) {
+              console.warn('Zip faylni ochishda xatolik:', unzipErr);
+            }
+            try { fs.unlinkSync(tempZip); } catch {}
           }
-          // Fayl SubGame AES-256 bilan shifrlanganligini tekshiramiz
-          let isEncrypted = false;
+        } else {
+          const downloadedFilePath = path.join(userSubDir, fileNames[0]);
+          await downloadSubtitleFile(config.subtitleDownloadUrl, downloadedFilePath, onStatusUpdate);
+        }
+
+        if (config.subtitleVersion) {
           try {
-            const testBuf = fs.readFileSync(downloadedFilePath);
-            decryptData(testBuf);
-            isEncrypted = true;
-          } catch {
-            isEncrypted = false;
-          }
-          source = { path: downloadedFilePath, isEncrypted };
+            fs.writeFileSync(versionFilePath, config.subtitleVersion.trim(), 'utf8');
+          } catch {}
         }
       } catch (dlErr: any) {
         console.warn('Subtitrni yuklab olishda ogohlantirish:', dlErr);
       }
     }
 
-    if (!source) {
-      return {
-        success: false,
-        message: `Subtitr manba fayli topilmadi. O'yin identifikatori: ${config.gameId}`,
-      };
-    }
+    const injectedList: InjectedFileInfo[] = [];
 
-    onStatusUpdate?.("Subtitr fayli o'yin papkasiga xavfsiz ulanmoqda...");
+    for (const targetFileName of fileNames) {
+      const destFilePath = path.join(destDir, targetFileName);
+      const backupFilePath = path.join(destDir, `${targetFileName}.subgame_bak`);
 
-    // Agar o'yin papkasida asl fayl mavjud bo'lsa va hali zaxiralanmagan bo'lsa, zaxiraga olamiz
-    if (fs.existsSync(destFilePath) && !fs.existsSync(backupFilePath)) {
-      try {
-        safeCopyFileSync(destFilePath, backupFilePath);
-      } catch (err) {
-        console.warn('Original faylni zaxiralashda ogohlantirish:', err);
+      let source = findSubtitleSource(config.gameId, targetFileName);
+
+      // Agar yuqoridagi umumiy yuklashdan keyin ham topilmagan bo'lsa va yakka fayl URL bo'lsa
+      if (!source && config.subtitleDownloadUrl && config.subtitleDownloadUrl.startsWith('http') && fileNames.length === 1) {
+        try {
+          if (!fs.existsSync(userSubDir)) {
+            fs.mkdirSync(userSubDir, { recursive: true });
+          }
+          const downloadedFilePath = path.join(userSubDir, targetFileName);
+          await downloadSubtitleFile(config.subtitleDownloadUrl, downloadedFilePath, onStatusUpdate);
+          if (fs.existsSync(downloadedFilePath)) {
+            let isEncrypted = false;
+            try {
+              const testBuf = fs.readFileSync(downloadedFilePath);
+              decryptData(testBuf);
+              isEncrypted = true;
+            } catch {
+              isEncrypted = false;
+            }
+            source = { path: downloadedFilePath, isEncrypted };
+          }
+        } catch (dlErr: any) {
+          console.warn('Subtitrni yuklab olishda ogohlantirish:', dlErr);
+        }
       }
-    }
 
-    // AES-256 bilan shifrlangan bo'lsa dekodlaymiz
-    let decryptedBuffer: Buffer | null = null;
-    if (source.isEncrypted) {
-      try {
-        const encryptedBuffer = fs.readFileSync(source.path);
-        decryptedBuffer = decryptData(encryptedBuffer);
-      } catch (decryptErr) {
-        console.warn('Dekodlashda ogohlantirish, asl fayl nusxalanmoqda:', decryptErr);
+      if (!source) {
+        return {
+          success: false,
+          message: `Subtitr manba fayli topilmadi: ${targetFileName}. O'yin identifikatori: ${config.gameId}`,
+        };
       }
-    } else {
-      // Har ehtimolga qarshi fayl shifrlanganligini tekshiramiz (masalan, .enc kengaytmasiz keshda qolgan bo'lsa)
-      try {
-        const testBuffer = fs.readFileSync(source.path);
-        decryptedBuffer = decryptData(testBuffer);
-      } catch {
-        decryptedBuffer = null;
-      }
-    }
 
-    if (decryptedBuffer) {
-      safeWriteFileSync(destFilePath, decryptedBuffer);
-    } else {
-      safeCopyFileSync(source.path, destFilePath);
+      onStatusUpdate?.(`Subtitr fayli (${targetFileName}) o'yin papkasiga xavfsiz ulanmoqda...`);
+
+      // Agar o'yin papkasida asl fayl mavjud bo'lsa va hali zaxiralanmagan bo'lsa, zaxiraga olamiz
+      if (fs.existsSync(destFilePath) && !fs.existsSync(backupFilePath)) {
+        try {
+          safeCopyFileSync(destFilePath, backupFilePath);
+        } catch (err) {
+          console.warn(`Original faylni zaxiralashda ogohlantirish (${targetFileName}):`, err);
+        }
+      }
+
+      // AES-256 bilan shifrlangan bo'lsa dekodlaymiz
+      let decryptedBuffer: Buffer | null = null;
+      if (source.isEncrypted) {
+        try {
+          const encryptedBuffer = fs.readFileSync(source.path);
+          decryptedBuffer = decryptData(encryptedBuffer);
+        } catch (decryptErr) {
+          console.warn(`Dekodlashda ogohlantirish (${targetFileName}):`, decryptErr);
+        }
+      } else {
+        try {
+          const testBuffer = fs.readFileSync(source.path);
+          decryptedBuffer = decryptData(testBuffer);
+        } catch {
+          decryptedBuffer = null;
+        }
+      }
+
+      if (decryptedBuffer) {
+        safeWriteFileSync(destFilePath, decryptedBuffer);
+      } else {
+        safeCopyFileSync(source.path, destFilePath);
+      }
+
+      injectedList.push({ destFilePath, backupFilePath });
     }
 
     return {
       success: true,
       message: `O‘zbekcha subtitr paketi o‘yinga muvaffaqiyatli ulandi!`,
-      targetPath: destFilePath,
+      targetPath: injectedList[0]?.destFilePath,
+      injectedFiles: injectedList,
     };
   } catch (error: any) {
     return {
@@ -539,8 +605,7 @@ export async function launchGameWithProtection(
 
     const shouldInject = !config.skipSubtitleInjection && !!config.targetSubtitleFileName && config.targetSubtitleFileName !== 'none';
     const gameDir = path.dirname(config.gameExePath);
-    let destFilePath: string | undefined;
-    let backupFilePath: string | undefined;
+    let injectedList: InjectedFileInfo[] = [];
 
     // 3. Inject subtitle into target directory if needed (e.g. TRTEXT/tt01.pc)
     if (shouldInject) {
@@ -548,10 +613,7 @@ export async function launchGameWithProtection(
       if (!injectRes.success) {
         return injectRes;
       }
-      const targetFileName = config.targetSubtitleFileName!;
-      const destDir = resolveTargetDir(gameDir, config.targetRelativeDir);
-      destFilePath = path.join(destDir, targetFileName);
-      backupFilePath = path.join(destDir, `${targetFileName}.subgame_bak`);
+      injectedList = injectRes.injectedFiles || [];
     } else {
       onStatusUpdate("O'yin ishga tushirishga tayyorlanmoqda...");
     }
@@ -580,8 +642,8 @@ export async function launchGameWithProtection(
     });
 
     // Windows mustaqil tozalovchi jarayonini ishga tushiramiz (Launcher yopilsa ham fonda ishlaydi)
-    if (shouldInject && destFilePath && destFilePath !== config.gameExePath) {
-      spawnDetachedCleanupWatcher(processPattern, destFilePath, backupFilePath);
+    if (shouldInject && injectedList.length > 0) {
+      spawnDetachedCleanupWatcher(processPattern, injectedList);
     }
 
     onStatusUpdate("O'yin faol va o'zbekcha subtitrlar ulandi. Maroqli hordiq!");
@@ -604,19 +666,22 @@ export async function launchGameWithProtection(
         activeSessions.delete(config.gameId);
         onStatusUpdate("O'yin yakunlandi. Subtitrlar himoyalanmoqda...");
 
-        if (shouldInject && destFilePath && destFilePath !== config.gameExePath) {
-          for (let attempt = 0; attempt < 10; attempt++) {
-            try {
-              if (backupFilePath && fs.existsSync(backupFilePath)) {
-                safeCopyFileSync(backupFilePath, destFilePath);
-                try { fs.unlinkSync(backupFilePath); } catch {}
-                break;
-              } else if (fs.existsSync(destFilePath)) {
-                fs.unlinkSync(destFilePath);
-                break;
+        if (shouldInject && injectedList.length > 0) {
+          for (const item of injectedList) {
+            if (!item.destFilePath || item.destFilePath === config.gameExePath) continue;
+            for (let attempt = 0; attempt < 10; attempt++) {
+              try {
+                if (item.backupFilePath && fs.existsSync(item.backupFilePath)) {
+                  safeCopyFileSync(item.backupFilePath, item.destFilePath);
+                  try { fs.unlinkSync(item.backupFilePath); } catch {}
+                  break;
+                } else if (fs.existsSync(item.destFilePath)) {
+                  fs.unlinkSync(item.destFilePath);
+                  break;
+                }
+              } catch {
+                await new Promise((r) => setTimeout(r, 1000));
               }
-            } catch {
-              await new Promise((r) => setTimeout(r, 1000));
             }
           }
         }
