@@ -405,10 +405,29 @@ export async function injectSubtitleFile(
       fs.mkdirSync(destDir, { recursive: true });
     }
 
+    // Avvalgi xatolikdan qolgan noto'g'ri nomli faylni tozalash
+    try {
+      const junkCorrupted = path.join(destDir, 'stringtable_en.sds,stringtable_ru.sds');
+      if (fs.existsSync(junkCorrupted)) {
+        fs.unlinkSync(junkCorrupted);
+      }
+    } catch {}
+
     const fileNames = config.targetSubtitleFileName
       .split(/[,;|]/)
       .map((s) => s.trim())
       .filter(Boolean);
+
+    // Mafia: Definitive Edition uchun agar faqat stringtable_en.sds ko'rsatilgan bo'lsa ham,
+    // o'yin papkasida stringtable_ru.sds bo'lsa, ikkala til foydalanuvchilariga ham ishlashi uchun uni ham qo'shamiz
+    if (
+      config.gameId === 'mafia-definitive-edition' ||
+      config.gameExePath.toLowerCase().includes('mafiadefinitiveedition')
+    ) {
+      if (!fileNames.includes('stringtable_ru.sds') && fs.existsSync(path.join(destDir, 'stringtable_ru.sds'))) {
+        fileNames.push('stringtable_ru.sds');
+      }
+    }
 
     const userSubDir = path.join(app.getPath('userData'), 'subtitles', config.gameId);
     const versionFilePath = path.join(userSubDir, 'version.txt');
@@ -456,29 +475,52 @@ export async function injectSubtitleFile(
           fs.mkdirSync(userSubDir, { recursive: true });
         }
 
-        const isZip = config.subtitleDownloadUrl.toLowerCase().includes('.zip') || fileNames.length > 1;
+        const tempDownloadPath = path.join(userSubDir, `temp_download_${Date.now()}`);
+        onStatusUpdate?.("Subtitr serverdan yuklanmoqda...");
+        await downloadSubtitleFile(config.subtitleDownloadUrl, tempDownloadPath, onStatusUpdate);
 
-        if (isZip) {
-          const tempZip = path.join(userSubDir, `bundle_${Date.now()}.zip`);
-          onStatusUpdate?.("Subtitrlar arxivi serverdan yuklanmoqda...");
-          await downloadSubtitleFile(config.subtitleDownloadUrl, tempZip, onStatusUpdate);
-          if (fs.existsSync(tempZip)) {
+        if (fs.existsSync(tempDownloadPath)) {
+          // Fayl turini tekshirish: Zip arxivmi yoki to'g'ridan-to'g'ri faylmi?
+          let isZipFile = false;
+          try {
+            const fd = fs.openSync(tempDownloadPath, 'r');
+            const magicBuf = Buffer.alloc(4);
+            fs.readSync(fd, magicBuf, 0, 4, 0);
+            fs.closeSync(fd);
+            // PK\x03\x04 (ZIP signature)
+            if (magicBuf[0] === 0x50 && magicBuf[1] === 0x4b && magicBuf[2] === 0x03 && magicBuf[3] === 0x04) {
+              isZipFile = true;
+            }
+          } catch {}
+
+          if (isZipFile) {
             try {
-              execSync(`powershell -NoProfile -Command "Expand-Archive -LiteralPath '${tempZip.replace(/'/g, "''")}' -DestinationPath '${userSubDir.replace(/'/g, "''")}' -Force"`, { windowsHide: true });
+              execSync(`powershell -NoProfile -Command "Expand-Archive -LiteralPath '${tempDownloadPath.replace(/'/g, "''")}' -DestinationPath '${userSubDir.replace(/'/g, "''")}' -Force"`, { windowsHide: true });
             } catch (unzipErr) {
               console.warn('Zip faylni ochishda xatolik:', unzipErr);
             }
-            try { fs.unlinkSync(tempZip); } catch {}
-          }
-        } else {
-          const downloadedFilePath = path.join(userSubDir, fileNames[0]);
-          await downloadSubtitleFile(config.subtitleDownloadUrl, downloadedFilePath, onStatusUpdate);
-        }
+            try { fs.unlinkSync(tempDownloadPath); } catch {}
+          } else {
+            // To'g'ridan-to'g'ri (zipsiz) subtitr fayli (masalan, .sds)
+            const primaryName = fileNames[0] || 'stringtable_en.sds';
+            const primaryFile = path.join(userSubDir, primaryName);
+            try { if (fs.existsSync(primaryFile)) fs.unlinkSync(primaryFile); } catch {}
+            fs.renameSync(tempDownloadPath, primaryFile);
 
-        if (config.subtitleVersion) {
-          try {
-            fs.writeFileSync(versionFilePath, config.subtitleVersion.trim(), 'utf8');
-          } catch {}
+            // Agar o'yin uchun qo'shimcha nomlar kerak bo'lsa (masalan, stringtable_ru.sds)
+            for (let i = 1; i < fileNames.length; i++) {
+              const secondaryFile = path.join(userSubDir, fileNames[i]);
+              try {
+                safeCopyFileSync(primaryFile, secondaryFile);
+              } catch {}
+            }
+          }
+
+          if (config.subtitleVersion) {
+            try {
+              fs.writeFileSync(versionFilePath, config.subtitleVersion.trim(), 'utf8');
+            } catch {}
+          }
         }
       } catch (dlErr: any) {
         console.warn('Subtitrni yuklab olishda ogohlantirish:', dlErr);
@@ -492,6 +534,17 @@ export async function injectSubtitleFile(
       const backupFilePath = path.join(destDir, `${targetFileName}.subgame_bak`);
 
       let source = findSubtitleSource(config.gameId, targetFileName);
+
+      // Agar aynan shu nomdagi manba topilmasa, lekin boshqa fayl yuklangan bo'lsa (masalan, EN -> RU nusxalash)
+      if (!source) {
+        for (const otherF of fileNames) {
+          const altSource = findSubtitleSource(config.gameId, otherF);
+          if (altSource) {
+            source = altSource;
+            break;
+          }
+        }
+      }
 
       // Agar yuqoridagi umumiy yuklashdan keyin ham topilmagan bo'lsa va yakka fayl URL bo'lsa
       if (!source && config.subtitleDownloadUrl && config.subtitleDownloadUrl.startsWith('http') && fileNames.length === 1) {

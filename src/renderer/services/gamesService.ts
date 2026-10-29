@@ -41,14 +41,14 @@ export async function fetchLauncherGames(): Promise<LauncherGame[]> {
         let status = data.subtitleStatus || data.status || 'Tayyor';
         let subtitleSize = data.subtitleSize || '1.5 MB';
 
-        // Mafia: Definitive Edition maxsus sozlamalari (Ikkala til fayli: Rus va Ingliz lokalizatsiyasi uchun)
+        // Mafia: Definitive Edition maxsus sozlamalari
         if (id === 'mafia-definitive-edition' || data.slug === 'mafia-definitive-edition') {
-          targetFileName = 'stringtable_en.sds,stringtable_ru.sds';
-          targetRelativeDir = 'sds_retail/string_tables';
-          defaultExeName = 'mafiadefinitiveedition.exe';
+          targetFileName = data.targetFileName || 'stringtable_en.sds';
+          targetRelativeDir = (data.targetRelativeDir || 'sds_retail/string_tables').replace(/[\\/]+$/, '');
+          defaultExeName = data.defaultExeName || 'mafiadefinitiveedition.exe';
           keyPrefix = 'SUB-MAFI';
           status = 'Tayyor';
-          subtitleSize = '1.6 MB';
+          subtitleSize = data.subtitleSize || '1.6 MB';
         }
 
         const isStandalone = Boolean(
