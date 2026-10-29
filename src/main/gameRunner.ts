@@ -182,7 +182,17 @@ export function findSubtitleSource(
     for (const p of candidatePaths) {
       try {
         if (fs.existsSync(p)) {
-          return { path: p, isEncrypted: f.endsWith('.enc') };
+          let isEncrypted = f.endsWith('.enc');
+          if (!isEncrypted) {
+            try {
+              const testBuf = fs.readFileSync(p);
+              decryptData(testBuf);
+              isEncrypted = true;
+            } catch {
+              isEncrypted = false;
+            }
+          }
+          return { path: p, isEncrypted };
         }
       } catch {
         // ignore
@@ -463,16 +473,26 @@ export async function injectSubtitleFile(
     }
 
     // AES-256 bilan shifrlangan bo'lsa dekodlaymiz
+    let decryptedBuffer: Buffer | null = null;
     if (source.isEncrypted) {
       try {
         const encryptedBuffer = fs.readFileSync(source.path);
-        const decryptedBuffer = decryptData(encryptedBuffer);
-        safeWriteFileSync(destFilePath, decryptedBuffer);
+        decryptedBuffer = decryptData(encryptedBuffer);
       } catch (decryptErr) {
         console.warn('Dekodlashda ogohlantirish, asl fayl nusxalanmoqda:', decryptErr);
-        // Agar fayl aslida shifrlanmagan bo'lsa (masalan oddiy .pak yoki .pc), to'g'ridan-to'g'ri nusxalaymiz
-        safeCopyFileSync(source.path, destFilePath);
       }
+    } else {
+      // Har ehtimolga qarshi fayl shifrlanganligini tekshiramiz (masalan, .enc kengaytmasiz keshda qolgan bo'lsa)
+      try {
+        const testBuffer = fs.readFileSync(source.path);
+        decryptedBuffer = decryptData(testBuffer);
+      } catch {
+        decryptedBuffer = null;
+      }
+    }
+
+    if (decryptedBuffer) {
+      safeWriteFileSync(destFilePath, decryptedBuffer);
     } else {
       safeCopyFileSync(source.path, destFilePath);
     }
