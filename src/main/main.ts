@@ -57,9 +57,9 @@ function createWindow() {
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    // Check if a lightweight delta patch update exists in userData
+    // In production packaged app, check if a lightweight delta patch update exists in userData
     const userUpdateIndex = path.join(app.getPath('userData'), 'update', 'dist', 'index.html');
-    if (fs.existsSync(userUpdateIndex)) {
+    if (app.isPackaged && fs.existsSync(userUpdateIndex)) {
       mainWindow.loadFile(userUpdateIndex).catch((err) => {
         console.warn('Failed to load user update index, falling back to bundled:', err);
         const indexPath = path.join(__dirname, '../../dist/index.html');

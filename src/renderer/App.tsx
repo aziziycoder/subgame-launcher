@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { GameCard } from './components/GameCard';
 import { ActivationModal } from './components/ActivationModal';
@@ -29,15 +29,25 @@ import {
   Loader2,
   Laptop,
   RefreshCw,
-  Crown
+  Crown,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
+const ITEMS_PER_PAGE = 8;
+
 export function App() {
-  const [activeTab, setActiveTab] = useState<'library' | 'device' | 'about'>('library');
+  const [activeTab, setActiveTab] = useState<'library' | 'my_games' | 'device' | 'about'>('library');
   const [hwidInfo, setHwidInfo] = useState<any>(null);
   const [licenses, setLicenses] = useState<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'ready' | 'active'>('all');
+  const [libraryPage, setLibraryPage] = useState(1);
+
+  // My Games tab states
+  const [myGamesPage, setMyGamesPage] = useState(1);
+  const [myGamesSearchQuery, setMyGamesSearchQuery] = useState('');
+  const [myGamesFilter, setMyGamesFilter] = useState<'all' | 'bound' | 'unbound'>('all');
 
   const [games, setGames] = useState<LauncherGame[]>([]);
   const [refreshingGames, setRefreshingGames] = useState(true);
@@ -211,13 +221,55 @@ export function App() {
     setSelectedGameForPlay(game);
   };
 
-  const filteredGames = games.filter((game) => {
-    const matchesSearch = game.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const isAct = isAdmin || cloudLicenses[game.id]?.status === 'active';
-    if (filter === 'active') return matchesSearch && isAct;
-    if (filter === 'ready') return matchesSearch && game.status === 'Tayyor';
-    return matchesSearch;
-  });
+  // Reset pagination when search or filters change
+  useEffect(() => {
+    setLibraryPage(1);
+  }, [searchQuery, filter]);
+
+  useEffect(() => {
+    setMyGamesPage(1);
+  }, [myGamesSearchQuery, myGamesFilter]);
+
+  const filteredGames = useMemo(() => {
+    return games.filter((game) => {
+      const matchesSearch = game.title.toLowerCase().includes(searchQuery.toLowerCase());
+      const isAct = isAdmin || cloudLicenses[game.id]?.status === 'active';
+      if (filter === 'active') return matchesSearch && isAct;
+      if (filter === 'ready') return matchesSearch && game.status === 'Tayyor';
+      return matchesSearch;
+    });
+  }, [games, searchQuery, filter, isAdmin, cloudLicenses]);
+
+  const libraryTotalPages = Math.ceil(filteredGames.length / ITEMS_PER_PAGE) || 1;
+  const paginatedLibraryGames = useMemo(() => {
+    const start = (libraryPage - 1) * ITEMS_PER_PAGE;
+    return filteredGames.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredGames, libraryPage]);
+
+  // User's owned/licensed games
+  const userOwnedGames = useMemo(() => {
+    return games.filter((game) => {
+      if (isAdmin) return game.status === 'Tayyor';
+      return cloudLicenses[game.id]?.status === 'active' || licenses[game.id]?.status === 'active';
+    });
+  }, [games, cloudLicenses, licenses, isAdmin]);
+
+  const filteredMyGames = useMemo(() => {
+    return userOwnedGames.filter((g) => {
+      const matchSearch = g.title.toLowerCase().includes(myGamesSearchQuery.toLowerCase());
+      if (!matchSearch) return false;
+      const isBound = Boolean(cloudLicenses[g.id]?.hwid);
+      if (myGamesFilter === 'bound') return isBound;
+      if (myGamesFilter === 'unbound') return !isBound;
+      return true;
+    });
+  }, [userOwnedGames, myGamesSearchQuery, myGamesFilter, cloudLicenses]);
+
+  const myGamesTotalPages = Math.ceil(filteredMyGames.length / ITEMS_PER_PAGE) || 1;
+  const paginatedMyGames = useMemo(() => {
+    const start = (myGamesPage - 1) * ITEMS_PER_PAGE;
+    return filteredMyGames.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredMyGames, myGamesPage]);
 
   const readyCount = games.filter((g) => g.status === 'Tayyor').length;
   const activeCount = isAdmin
@@ -225,6 +277,83 @@ export function App() {
     : user
     ? Object.values(cloudLicenses).filter((l) => l.status === 'active').length
     : Object.values(licenses).filter((l: any) => l.status === 'active').length;
+
+  const renderPagination = (
+    currentPage: number,
+    totalPages: number,
+    totalItems: number,
+    onPageChange: (p: number) => void
+  ) => {
+    if (totalPages <= 1) return null;
+
+    const startIdx = (currentPage - 1) * ITEMS_PER_PAGE + 1;
+    const endIdx = Math.min(currentPage * ITEMS_PER_PAGE, totalItems);
+
+    const getPageNumbers = () => {
+      const pages: (number | string)[] = [];
+      if (totalPages <= 5) {
+        for (let i = 1; i <= totalPages; i++) pages.push(i);
+      } else {
+        if (currentPage <= 3) {
+          pages.push(1, 2, 3, 4, '...', totalPages);
+        } else if (currentPage >= totalPages - 2) {
+          pages.push(1, '...', totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+        } else {
+          pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages);
+        }
+      }
+      return pages;
+    };
+
+    return (
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#2A3245] mt-6">
+        <div className="text-xs text-gray-400">
+          Jami <span className="text-white font-semibold font-mono">{totalItems}</span> ta o‘yindan{' '}
+          <span className="text-[#A3E635] font-semibold font-mono">{startIdx}-{endIdx}</span> ko‘rsatilmoqda
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            disabled={currentPage === 1}
+            className="p-1.5 rounded-lg border border-[#2A3245] bg-[#141821] text-gray-300 hover:text-white hover:border-[#A3E635]/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+            title="Oldingi sahifa"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+
+          {getPageNumbers().map((page, idx) =>
+            typeof page === 'number' ? (
+              <button
+                key={idx}
+                onClick={() => onPageChange(page)}
+                className={`min-w-8 h-8 px-2 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+                  currentPage === page
+                    ? 'bg-[#A3E635] text-[#0B0D12] border-[#A3E635] font-bold shadow-sm shadow-[#A3E635]/20'
+                    : 'bg-[#141821] border-[#2A3245] text-gray-300 hover:text-white hover:border-gray-500'
+                }`}
+              >
+                {page}
+              </button>
+            ) : (
+              <span key={idx} className="px-1 text-xs text-gray-500 select-none">
+                {page}
+              </span>
+            )
+          )}
+
+          <button
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage === totalPages}
+            className="p-1.5 rounded-lg border border-[#2A3245] bg-[#141821] text-gray-300 hover:text-white hover:border-[#A3E635]/50 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+            title="Keyingi sahifa"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#0B0D12] text-[#F5F7FA] overflow-hidden font-sans">
@@ -332,7 +461,7 @@ export function App() {
             <nav className="space-y-1.5">
               <button
                 onClick={() => setActiveTab('library')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
                   activeTab === 'library'
                     ? 'bg-[#A3E635]/15 text-[#A3E635] border border-[#A3E635]/40 shadow-sm'
                     : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -340,8 +469,26 @@ export function App() {
               >
                 <Gamepad2 className="w-4 h-4 text-[#A3E635]" />
                 <span>Kutubxona</span>
+                <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/5 text-gray-400 border border-white/10 font-mono">
+                  {games.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab('my_games');
+                  setMyGamesPage(1);
+                }}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
+                  activeTab === 'my_games'
+                    ? 'bg-[#A3E635]/15 text-[#A3E635] border border-[#A3E635]/40 shadow-sm'
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <KeyRound className="w-4 h-4 text-[#A3E635]" />
+                <span>Mening O‘yinlarim</span>
                 {activeCount > 0 && (
-                  <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#A3E635]/20 text-[#A3E635] border border-[#A3E635]/30">
+                  <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#A3E635]/20 text-[#A3E635] border border-[#A3E635]/30 font-mono">
                     {activeCount}
                   </span>
                 )}
@@ -349,7 +496,7 @@ export function App() {
 
               <button
                 onClick={() => setActiveTab('device')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
                   activeTab === 'device'
                     ? 'bg-[#A3E635]/15 text-[#A3E635] border border-[#A3E635]/40 shadow-sm'
                     : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -361,7 +508,7 @@ export function App() {
 
               <button
                 onClick={() => setActiveTab('about')}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
                   activeTab === 'about'
                     ? 'bg-[#A3E635]/15 text-[#A3E635] border border-[#A3E635]/40 shadow-sm'
                     : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -507,23 +654,182 @@ export function App() {
                   <p className="text-xs text-gray-400">O‘yinlar bazadan yuklanmoqda...</p>
                 </div>
               ) : filteredGames.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 gap-4 pb-16">
-                  {filteredGames.map((game) => (
-                    <GameCard
-                      key={game.id}
-                      game={game}
-                      cloudLicense={cloudLicenses[game.id]}
-                      currentHwid={hwidInfo?.hwid}
-                      isActivated={isAdmin || cloudLicenses[game.id]?.status === 'active'}
-                      isAdmin={isAdmin}
-                      onActivate={() => openLink(`https://www.subgame.uz/games/${game.slug}`)}
-                      onPlay={() => handlePlayGame(game)}
-                    />
-                  ))}
+                <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 gap-4 pb-4">
+                    {paginatedLibraryGames.map((game) => (
+                      <GameCard
+                        key={game.id}
+                        game={game}
+                        cloudLicense={cloudLicenses[game.id]}
+                        currentHwid={hwidInfo?.hwid}
+                        isActivated={isAdmin || cloudLicenses[game.id]?.status === 'active'}
+                        isAdmin={isAdmin}
+                        onActivate={() => openLink(`https://www.subgame.uz/games/${game.slug}`)}
+                        onPlay={() => handlePlayGame(game)}
+                      />
+                    ))}
+                  </div>
+                  {renderPagination(libraryPage, libraryTotalPages, filteredGames.length, setLibraryPage)}
                 </div>
               ) : (
                 <div className="py-20 text-center text-xs text-gray-500">
                   O‘yinlar topilmadi
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'my_games' && (
+            <div>
+              {/* Header & Filter Controls */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-5 border-b border-[#2A3245]">
+                <div>
+                  <h1 className="text-2xl font-extrabold text-[#F5F7FA] tracking-tight flex items-center gap-2.5">
+                    <KeyRound className="w-6 h-6 text-[#A3E635]" />
+                    <span>Mening O‘yinlarim</span>
+                  </h1>
+                  <p className="text-xs text-[#9CA3AF] mt-1">
+                    Sizga tegishli faol litsenziyalar va ushbu kompyuterga bog‘langan o‘yinlar
+                  </p>
+                </div>
+
+                {user && userOwnedGames.length > 0 && (
+                  <div className="flex items-center gap-3">
+                    {/* Search */}
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="O‘yin nomini qidirish..."
+                        value={myGamesSearchQuery}
+                        onChange={(e) => setMyGamesSearchQuery(e.target.value)}
+                        className="pl-9 pr-4 py-2 bg-[#141821] border border-[#2A3245] rounded-xl text-xs text-[#F5F7FA] placeholder:text-gray-500 focus:outline-none focus:border-[#A3E635] focus:ring-1 focus:ring-[#A3E635] transition-all w-52"
+                      />
+                    </div>
+
+                    {/* Filter chips */}
+                    <div className="flex items-center bg-[#141821] p-1 rounded-xl border border-[#2A3245] text-xs">
+                      <button
+                        onClick={() => setMyGamesFilter('all')}
+                        className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                          myGamesFilter === 'all'
+                            ? 'bg-[#A3E635] text-[#0B0D12] font-bold shadow-sm'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Barchasi ({userOwnedGames.length})
+                      </button>
+                      <button
+                        onClick={() => setMyGamesFilter('bound')}
+                        className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                          myGamesFilter === 'bound'
+                            ? 'bg-[#A3E635] text-[#0B0D12] font-bold shadow-sm'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Ulangan
+                      </button>
+                      <button
+                        onClick={() => setMyGamesFilter('unbound')}
+                        className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                          myGamesFilter === 'unbound'
+                            ? 'bg-[#A3E635] text-[#0B0D12] font-bold shadow-sm'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        Ulanmagan
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Content View */}
+              {!user ? (
+                <div className="py-20 text-center flex flex-col items-center justify-center max-w-md mx-auto space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-[#141821] border border-[#2A3245] flex items-center justify-center text-[#A3E635] shadow-lg">
+                    <KeyRound className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold text-white">Hisobingizga kiring</h3>
+                    <p className="text-xs text-gray-400">
+                      Sotib olingan yoki sizga berilgan barcha litsenziyalarni ko‘rish va o‘yinlarni ishga tushirish uchun Google hisobingizni ulang.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => startDevicePairing()}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white hover:bg-gray-100 text-[#0B0D12] text-xs font-bold shadow-lg transition-all cursor-pointer"
+                  >
+                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      />
+                    </svg>
+                    <span>Google bilan ulash</span>
+                  </button>
+                </div>
+              ) : filteredMyGames.length > 0 ? (
+                <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 gap-4 pb-4">
+                    {paginatedMyGames.map((game) => (
+                      <GameCard
+                        key={game.id}
+                        game={game}
+                        cloudLicense={cloudLicenses[game.id]}
+                        currentHwid={hwidInfo?.hwid}
+                        isActivated={true}
+                        isAdmin={isAdmin}
+                        onActivate={() => openLink(`https://www.subgame.uz/games/${game.slug}`)}
+                        onPlay={() => handlePlayGame(game)}
+                      />
+                    ))}
+                  </div>
+                  {renderPagination(myGamesPage, myGamesTotalPages, filteredMyGames.length, setMyGamesPage)}
+                </div>
+              ) : (
+                <div className="py-20 text-center flex flex-col items-center justify-center max-w-md mx-auto space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-[#141821] border border-[#2A3245] flex items-center justify-center text-gray-500">
+                    <KeyRound className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold text-white">
+                      {myGamesSearchQuery ? 'Qidiruv bo‘yicha o‘yin topilmadi' : 'Sizda hali litsenziyali o‘yinlar yo‘q'}
+                    </h3>
+                    <p className="text-xs text-gray-400">
+                      {myGamesSearchQuery
+                        ? 'Qidiruv so‘zini tekshiring yoki filtrlarni tozalang.'
+                        : 'Rasmiy veb-saytimiz orqali yoki kutubxonadan o‘yin litsenziyalariga ega bo‘ling.'}
+                    </p>
+                  </div>
+                  {!myGamesSearchQuery && (
+                    <div className="flex items-center gap-3 pt-2">
+                      <button
+                        onClick={() => setActiveTab('library')}
+                        className="px-4 py-2 rounded-xl bg-[#A3E635] text-[#0B0D12] text-xs font-bold hover:bg-[#8cd318] transition-colors cursor-pointer"
+                      >
+                        Kutubxonani ko‘rish
+                      </button>
+                      <button
+                        onClick={() => openLink('https://www.subgame.uz')}
+                        className="px-4 py-2 rounded-xl bg-[#141821] border border-[#2A3245] text-xs text-gray-300 hover:text-white transition-colors cursor-pointer"
+                      >
+                        Saytdan o‘yin tanlash
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
