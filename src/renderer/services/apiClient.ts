@@ -1,7 +1,9 @@
 /**
  * Central API Client for SubGame Launcher (Django REST Framework Backend)
  */
-export const BACKEND_API_URL = 'http://127.0.0.1:8000';
+export const BACKEND_API_URL =
+  (import.meta as any).env?.VITE_BACKEND_API_URL ||
+  ((import.meta as any).env?.DEV ? 'http://127.0.0.1:8000' : 'https://api.subgame.uz');
 
 export async function fetchFromBackend<T = any>(endpoint: string, options: RequestInit = {}): Promise<T | null> {
   try {
