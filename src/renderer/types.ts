@@ -57,6 +57,7 @@ export interface SubGameApi {
     subtitleVersion?: string;
   }) => Promise<{ success: boolean; message: string; targetPath?: string }>;
   openGameFolder: (exePath: string) => Promise<boolean>;
+  getSubtitleVersion: (gameId: string) => Promise<string | null>;
   onStatusUpdate: (callback: (status: any) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
   openExternal: (url: string) => void;

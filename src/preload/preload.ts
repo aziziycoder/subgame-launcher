@@ -19,6 +19,7 @@ export interface SubGameApi {
   launchGame: (config: GameLaunchConfigPayload) => Promise<{ success: boolean; message: string }>;
   installSubtitle: (config: GameLaunchConfigPayload) => Promise<{ success: boolean; message: string; targetPath?: string }>;
   openGameFolder: (exePath: string) => Promise<boolean>;
+  getSubtitleVersion: (gameId: string) => Promise<string | null>;
   onStatusUpdate: (callback: (status: any) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
   openExternal: (url: string) => void;
@@ -36,6 +37,7 @@ const api: SubGameApi = {
   launchGame: (config) => ipcRenderer.invoke('launch-game', config),
   installSubtitle: (config) => ipcRenderer.invoke('install-subtitle', config),
   openGameFolder: (exePath) => ipcRenderer.invoke('open-game-folder', exePath),
+  getSubtitleVersion: (gameId: string) => ipcRenderer.invoke('get-subtitle-version', gameId),
   onStatusUpdate: (callback) => {
     const handler = (_: any, status: string) => callback(status);
     ipcRenderer.on('game-status', handler);

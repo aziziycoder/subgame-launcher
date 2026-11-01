@@ -168,6 +168,18 @@ ipcMain.handle('install-subtitle', async (_, config) => {
   });
 });
 
+// IPC: Get Installed Subtitle Version for a Game
+ipcMain.handle('get-subtitle-version', (_, gameId: string) => {
+  try {
+    if (!gameId) return null;
+    const versionFile = path.join(app.getPath('userData'), 'subtitles', gameId, 'version.txt');
+    if (fs.existsSync(versionFile)) {
+      return fs.readFileSync(versionFile, 'utf8').trim();
+    }
+  } catch {}
+  return null;
+});
+
 // IPC: Open Game Folder in Explorer
 ipcMain.handle('open-game-folder', async (_, exePath: string) => {
   if (exePath) {

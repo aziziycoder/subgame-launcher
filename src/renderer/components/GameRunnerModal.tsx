@@ -16,6 +16,24 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
   const [downloadInfo, setDownloadInfo] = useState<{ transferredMb: string; totalMb: string } | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [installedSubtitleVersion, setInstalledSubtitleVersion] = useState<string | null>(null);
+  const [checkingVersion, setCheckingVersion] = useState(true);
+
+  const isStandalone = Boolean(
+    game.isStandalone ||
+    game.skipSubtitleInjection ||
+    game.id === 'level-devil' ||
+    game.slug === 'level-devil' ||
+    !game.targetFileName
+  );
+
+  const targetVersion = (game.version || '').trim();
+  const hasSubtitleUrl = Boolean(game.subtitleDownloadUrl && game.subtitleDownloadUrl.startsWith('http'));
+
+  // If game requires subtitles: verify whether current installed version equals the latest version
+  const isSubtitleOutdated = !isStandalone && hasSubtitleUrl && Boolean(
+    targetVersion && (!installedSubtitleVersion || installedSubtitleVersion !== targetVersion)
+  );
 
   useEffect(() => {
     // Load previously saved path if exists
@@ -23,6 +41,26 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     if (saved) {
       setExePath(saved);
     }
+
+    let isMounted = true;
+    async function checkInstalledVersion() {
+      setCheckingVersion(true);
+      let ver: string | null = null;
+      try {
+        if (window.subgame?.getSubtitleVersion) {
+          ver = await window.subgame.getSubtitleVersion(game.id);
+        }
+      } catch {}
+      if (!ver) {
+        ver = localStorage.getItem(`subgame_sub_version_${game.id}`);
+      }
+      if (isMounted) {
+        setInstalledSubtitleVersion(ver || null);
+        setCheckingVersion(false);
+      }
+    }
+    checkInstalledVersion();
+    return () => { isMounted = false; };
   }, [game.id]);
 
   useEffect(() => {
@@ -108,7 +146,11 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
       });
 
       if (res?.success) {
-        setSuccessMessage(res.message || "O‘zbekcha subtitr paketi o‘yinga muvaffaqiyatli ulandi!");
+        setInstalledSubtitleVersion(targetVersion);
+        try {
+          localStorage.setItem(`subgame_sub_version_${game.id}`, targetVersion);
+        } catch {}
+        setSuccessMessage(res.message || `O‘zbekcha subtitr (${targetVersion}) muvaffaqiyatli ulandi! Endi o‘yinni boshlashingiz mumkin.`);
         setStatusMessage('');
       } else {
         setError(res?.message || "Subtitrni joylashda xatolik yuz berdi.");
@@ -132,6 +174,11 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
   const handleLaunch = async () => {
     if (!exePath) {
       setError(`Iltimos, avval o'yin ijro faylini (${game.defaultExeName}) tanlang.`);
+      return;
+    }
+
+    if (isSubtitleOutdated) {
+      setError(`Subtitr yangilanmagan! O‘yinni o‘ynashdan oldin yangi versiyani (${targetVersion}) yuklab olishingiz shart.`);
       return;
     }
 
@@ -200,6 +247,30 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
             <p className="text-xs text-gray-400">O‘zbekcha subtitrlar bilan xavfsiz ishga tushirish</p>
           </div>
         </div>
+
+        {/* Subtitle Outdated / Missing Warning Notice */}
+        {isSubtitleOutdated && (
+          <div className="p-3.5 bg-amber-500/10 border border-amber-500/40 rounded-xl text-xs mb-4">
+            <div className="flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-300">
+                    {installedSubtitleVersion ? "Yangi subtitr versiyasi mavjud!" : "Subtitr hali yuklanmagan!"}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-amber-400/20 text-amber-300 font-mono text-[11px] font-bold border border-amber-400/30">
+                    {targetVersion}
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-300 mt-1 leading-relaxed">
+                  {installedSubtitleVersion
+                    ? `Sizdagi versiya: ${installedSubtitleVersion}. O‘yinni o‘ynashdan oldin yangi subtitr versiyasini yuklab olishingiz shart.`
+                    : `Ushbu o‘yin o‘zbek tilida ishlashi uchun avval yangi subtitr paketini yuklab olishingiz shart.`}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Executable selection */}
         <div className="space-y-3 mb-5">
@@ -340,28 +411,55 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
           >
             Yopish
           </button>
-          <button
-            type="button"
-            onClick={handleLaunch}
-            disabled={launching || installing}
-            className="flex-2 py-3 px-6 rounded-xl bg-[#A3E635] hover:bg-[#84CC16] text-[#0B0D12] text-sm font-extrabold shadow-sm shadow-[#A3E635]/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
-          >
-            {launching || installing ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-[#0B0D12]" />
-                <span>
-                  {downloadProgress !== null && downloadProgress >= 0
-                    ? `Yuklanmoqda: ${downloadProgress}%`
-                    : 'Ishga tushmoqda...'}
-                </span>
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-current" />
-                <span>O‘yinni Boshlash</span>
-              </>
-            )}
-          </button>
+
+          {isSubtitleOutdated ? (
+            <button
+              type="button"
+              onClick={handleInstallSubtitle}
+              disabled={installing || launching}
+              className="flex-2 py-3 px-6 rounded-xl bg-gradient-to-r from-amber-400 via-lime-400 to-[#A3E635] hover:opacity-95 text-[#0B0D12] text-sm font-extrabold shadow-md shadow-amber-400/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              title="O‘yinni o‘ynash uchun avval yangi subtitr paketini yuklab oling"
+            >
+              {installing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-[#0B0D12]" />
+                  <span>
+                    {downloadProgress !== null && downloadProgress >= 0
+                      ? `Yuklanmoqda: ${downloadProgress}%`
+                      : 'Yuklab olinmoqda...'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <DownloadCloud className="w-4 h-4" />
+                  <span>Yangi Subtitrni Yuklab Olish ({targetVersion})</span>
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleLaunch}
+              disabled={launching || installing}
+              className="flex-2 py-3 px-6 rounded-xl bg-[#A3E635] hover:bg-[#84CC16] text-[#0B0D12] text-sm font-extrabold shadow-sm shadow-[#A3E635]/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {launching || installing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-[#0B0D12]" />
+                  <span>
+                    {downloadProgress !== null && downloadProgress >= 0
+                      ? `Yuklanmoqda: ${downloadProgress}%`
+                      : 'Ishga tushmoqda...'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>O‘yinni Boshlash</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>
