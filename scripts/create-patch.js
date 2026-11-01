@@ -42,6 +42,7 @@ if (fs.existsSync(webDownloadsDir)) {
     try { vData = JSON.parse(fs.readFileSync(versionJsonPath, 'utf8')); } catch {}
   }
   vData.version = version;
+  vData.minRequiredVersion = version;
   vData.patchUrl = 'https://www.subgame.uz/downloads/update-bundle.zip';
   vData.patchSize = `${sizeKb} KB`;
   vData.downloadUrl = vData.downloadUrl || 'https://www.subgame.uz/downloads/SubGame-Launcher.exe';

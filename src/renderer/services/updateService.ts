@@ -46,9 +46,8 @@ export async function checkForAppUpdate(): Promise<{
       const data = snap.data() as AppUpdateInfo;
       if (data && data.version) {
         const updateAvailable = compareVersions(data.version, currentVersion) > 0;
-        const isForceUpdate = Boolean(
-          data.minRequiredVersion && compareVersions(data.minRequiredVersion, currentVersion) > 0
-        );
+        // Barcha yangilanishlar doimiy majburiy (majburiy update)
+        const isForceUpdate = updateAvailable;
         return { updateAvailable, isForceUpdate, currentVersion, latestInfo: data };
       }
     }
@@ -63,9 +62,8 @@ export async function checkForAppUpdate(): Promise<{
       const data = (await res.json()) as AppUpdateInfo;
       if (data && data.version) {
         const updateAvailable = compareVersions(data.version, currentVersion) > 0;
-        const isForceUpdate = Boolean(
-          data.minRequiredVersion && compareVersions(data.minRequiredVersion, currentVersion) > 0
-        );
+        // Barcha yangilanishlar doimiy majburiy (majburiy update)
+        const isForceUpdate = updateAvailable;
         return { updateAvailable, isForceUpdate, currentVersion, latestInfo: data };
       }
     }

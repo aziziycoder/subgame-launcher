@@ -171,7 +171,7 @@ export function App() {
 
   const handlePlayGame = async (game: LauncherGame) => {
     // 0. Force Update Check: If launcher is outdated, block playing
-    if (updateData.isForceUpdate) {
+    if (updateData.isForceUpdate || updateData.updateAvailable) {
       setIsUpdateModalOpen(true);
       return;
     }
@@ -368,16 +368,7 @@ export function App() {
         onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
       />
 
-      {/* Maintenance Notice Banner */}
-      <div className="bg-gradient-to-r from-amber-500/20 via-amber-500/30 to-amber-500/20 border-b border-amber-500/40 text-amber-200 py-1.5 px-4 text-xs font-bold flex items-center justify-center gap-2 select-none shrink-0 shadow-sm">
-        <span className="flex h-2 w-2 relative shrink-0">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-        </span>
-        <span className="leading-tight">
-          ⚠️ <strong>Texnik ishlar olib borilmoqda:</strong> Server va tizimlarda texnik profilaktika ishlari davom etmoqda.
-        </span>
-      </div>
+
 
       {/* Main Layout Body */}
       <div className="flex-1 flex overflow-hidden">

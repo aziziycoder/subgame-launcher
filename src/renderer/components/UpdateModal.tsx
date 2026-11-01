@@ -191,53 +191,62 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 border-t border-[#2A3245] bg-[#0B0D12]/60 flex items-center justify-end gap-2.5">
-          {!downloading && !applying && (
-            <button
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-xl bg-[#1E2533] hover:bg-[#2A3245] text-xs font-semibold text-gray-300 transition-colors cursor-pointer"
-            >
-              Keyinroq
-            </button>
-          )}
+        <div className="p-4 border-t border-[#2A3245] bg-[#0B0D12]/60 flex items-center justify-between gap-2.5">
+          {isForceUpdate ? (
+            <span className="text-[11px] text-amber-400 font-medium flex items-center gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              Davom etish uchun yangilash majburiy
+            </span>
+          ) : <div />}
 
-          {downloadedTempPath ? (
-            <button
-              onClick={handleApplyUpdate}
-              disabled={applying}
-              className="px-5 py-2.5 rounded-xl bg-[#A3E635] hover:bg-[#84CC16] text-[#0B0D12] text-xs font-black flex items-center gap-2 shadow-accent-glow transition-all hover:scale-[1.02] cursor-pointer disabled:opacity-50"
-            >
-              {applying ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Yangilanmoqda...</span>
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-4 h-4 stroke-[2.5]" />
-                  <span>Qayta ishga tushirish</span>
-                </>
-              )}
-            </button>
-          ) : (
-            <button
-              onClick={handleStartDownload}
-              disabled={downloading}
-              className="px-5 py-2.5 rounded-xl bg-[#A3E635] hover:bg-[#84CC16] text-[#0B0D12] text-xs font-black flex items-center gap-2 shadow-accent-glow transition-all hover:scale-[1.02] cursor-pointer disabled:opacity-50"
-            >
-              {downloading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Yuklanmoqda ({progress}%)</span>
-                </>
-              ) : (
-                <>
-                  <DownloadCloud className="w-4 h-4 stroke-[2.5]" />
-                  <span>Hozir yangilash</span>
-                </>
-              )}
-            </button>
-          )}
+          <div className="flex items-center gap-2.5">
+            {!isForceUpdate && !downloading && !applying && (
+              <button
+                onClick={onClose}
+                className="px-4 py-2.5 rounded-xl bg-[#1E2533] hover:bg-[#2A3245] text-xs font-semibold text-gray-300 transition-colors cursor-pointer"
+              >
+                Keyinroq
+              </button>
+            )}
+
+            {downloadedTempPath ? (
+              <button
+                onClick={handleApplyUpdate}
+                disabled={applying}
+                className="px-5 py-2.5 rounded-xl bg-[#A3E635] hover:bg-[#84CC16] text-[#0B0D12] text-xs font-black flex items-center gap-2 shadow-accent-glow transition-all hover:scale-[1.02] cursor-pointer disabled:opacity-50"
+              >
+                {applying ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Yangilanmoqda...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4 stroke-[2.5]" />
+                    <span>Qayta ishga tushirish</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={handleStartDownload}
+                disabled={downloading}
+                className="px-5 py-2.5 rounded-xl bg-[#A3E635] hover:bg-[#84CC16] text-[#0B0D12] text-xs font-black flex items-center gap-2 shadow-accent-glow transition-all hover:scale-[1.02] cursor-pointer disabled:opacity-50"
+              >
+                {downloading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Yuklanmoqda ({progress}%)</span>
+                  </>
+                ) : (
+                  <>
+                    <DownloadCloud className="w-4 h-4 stroke-[2.5]" />
+                    <span>Hozir yangilash</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
