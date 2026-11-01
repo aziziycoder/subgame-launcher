@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import type { GameLicense } from '../types';
+import { fetchFromBackend, clearTokens } from '../services/apiClient';
 
 export const ADMIN_EMAILS = [
   'azizbekgulomovweb@gmail.com',
@@ -146,7 +147,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const openPairingInBrowser = (code: string) => {
-    const url = `https://sub-game.vercel.app/connect?code=${code}`;
+    const url = `https://subgame.uz/connect?code=${code}`;
     if (window.subgame?.openExternal) {
       window.subgame.openExternal(url);
     } else {
@@ -211,6 +212,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    clearTokens();
     localStorage.removeItem('subgame_auth_user');
     setUser(null);
     setCloudLicenses({});
@@ -225,13 +227,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Iltimos, avval hisobingizga kiring.' };
     }
 
-    const license = cloudLicenses[gameId];
-    if (!license) {
-      return { success: false, message: 'Ushbu o‘yin uchun litsenziya topilmadi.' };
+    // 1. Try binding via Django Backend (1-PC Hardware DRM)
+    try {
+      const backendRes = await fetchFromBackend<{ success: boolean; message?: string }>('api/v1/licenses/bind-hwid/', {
+        method: 'POST',
+        body: JSON.stringify({
+          gameId,
+          hwid: currentHwid,
+          deviceName: deviceName || 'Asosiy PC',
+        }),
+      });
+      if (backendRes && !backendRes.success) {
+        return backendRes;
+      }
+    } catch (e) {
+      console.warn('[Backend] HWID bind warning, syncing to Firestore:', e);
     }
 
-    // Check if already bound
-    if (license.hwid) {
+    const license = cloudLicenses[gameId];
+    if (license?.hwid) {
       if (license.hwid === currentHwid) {
         return { success: true };
       } else {
@@ -242,7 +256,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // Bind this machine's HWID
+    // Bind this machine's HWID to Firestore fallback
     try {
       const licenseRef = doc(db, 'licenses', `${user.uid}_${gameId}`);
       await updateDoc(licenseRef, {
