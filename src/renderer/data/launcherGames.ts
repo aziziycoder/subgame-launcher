@@ -23,7 +23,7 @@ export interface LauncherGame {
 }
 
 /**
- * Barcha o‘yinlar to‘g‘ridan-to‘g‘ri Firebase Firestore bazasidan yuklanadi.
+ * Barcha o‘yinlar to‘g‘ridan-to‘g‘ri backend bazasidan yuklanadi.
  * Kod ichidagi statik massiv to‘liq olib tashlangan.
  */
 export const LAUNCHER_GAMES: LauncherGame[] = [];

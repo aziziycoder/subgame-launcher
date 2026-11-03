@@ -65,13 +65,16 @@ export function App() {
     startDevicePairing,
     cancelDevicePairing,
     openPairingInBrowser,
+    pairingError,
     signOut,
+    refreshLicenses,
     bindDeviceToLicense,
   } = useAuth();
 
   const [deviceMismatchModal, setDeviceMismatchModal] = useState<{
     gameTitle: string;
     boundDevice: string;
+    currentDevice: string;
   } | null>(null);
 
   const [deviceBindingLoading, setDeviceBindingLoading] = useState(false);
@@ -153,6 +156,13 @@ export function App() {
     handleCheckForUpdates(false);
   }, []);
 
+  useEffect(() => {
+    if (!pairingError) return;
+    setUpdateToast(pairingError);
+    const timer = setTimeout(() => setUpdateToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [pairingError]);
+
   const copyFullHwid = () => {
     if (hwidInfo?.hwid) {
       navigator.clipboard.writeText(hwidInfo.hwid);
@@ -188,33 +198,44 @@ export function App() {
       return;
     }
 
-    // 3. Check if user already owns this game in cloudLicenses
-    const cloudLic = cloudLicenses[game.id];
+    // 3. Check if user already owns this game, preferring fresh data over the cached list
+    setDeviceBindingLoading(true);
+    const freshLicenses = await refreshLicenses();
+    const cloudLic = (freshLicenses || cloudLicenses)[game.id];
     if (!cloudLic || cloudLic.status !== 'active') {
+      setDeviceBindingLoading(false);
       // User must first claim or purchase the game from the official website!
       openLink(`https://www.subgame.uz/games/${game.slug}`);
       return;
     }
 
-    const currentHwid = hwidInfo?.hwid || 'LOCAL_HWID';
-    const currentDeviceName = hwidInfo?.formattedHwid || 'Ushbu kompyuter';
-
-    // 4. HWID Enforcement (1 device per account)
-    if (cloudLic.hwid) {
-      if (cloudLic.hwid !== currentHwid) {
-        setDeviceMismatchModal({
-          gameTitle: game.title,
-          boundDevice: cloudLic.boundDeviceName || 'Boshqa kompyuter',
-        });
-        return;
-      }
-    } else {
-      // First launch: bind to this PC!
-      setDeviceBindingLoading(true);
-      await bindDeviceToLicense(game.id, currentHwid, currentDeviceName);
-      cloudLic.hwid = currentHwid;
-      cloudLic.boundDeviceName = currentDeviceName;
+    const currentHardware = hwidInfo || (await window.subgame?.getHardwareId());
+    if (!currentHardware?.hwid) {
       setDeviceBindingLoading(false);
+      setUpdateToast('Kompyuter identifikatorini aniqlab bo‘lmadi. Launcherni qayta ishga tushiring.');
+      setTimeout(() => setUpdateToast(null), 4000);
+      return;
+    }
+
+    // 4. HWID Enforcement (1 device per account): the backend decides, so an admin reset applies immediately
+    const binding = await bindDeviceToLicense(game.id, currentHardware.hwid, currentHardware.formattedHwid);
+    setDeviceBindingLoading(false);
+
+    if (binding.isBoundToAnotherDevice) {
+      setDeviceMismatchModal({
+        gameTitle: game.title,
+        boundDevice: binding.boundDeviceName || 'Boshqa kompyuter',
+        currentDevice: currentHardware.formattedHwid,
+      });
+      return;
+    }
+
+    // Without internet, only the last binding confirmed by the server is honoured
+    const allowedOffline = binding.offline && cloudLic.hwid === currentHardware.hwid;
+    if (!binding.success && !allowedOffline) {
+      setUpdateToast(binding.message || 'Litsenziyani tekshirishda xatolik yuz berdi.');
+      setTimeout(() => setUpdateToast(null), 4000);
+      return;
     }
 
     // 5. Authorized for this device! Open GameRunnerModal
@@ -963,6 +984,10 @@ export function App() {
             <div className="p-3 rounded-xl bg-[#0B0D12] border border-[#2A3245] text-xs font-mono text-rose-400 flex items-center justify-center gap-2">
               <Laptop className="w-4 h-4 text-rose-400" />
               <span>Bog‘langan: {deviceMismatchModal.boundDevice}</span>
+            </div>
+            <div className="p-3 rounded-xl bg-[#0B0D12] border border-[#2A3245] text-xs font-mono text-gray-300 flex items-center justify-center gap-2">
+              <Laptop className="w-4 h-4 text-gray-400" />
+              <span>Bu kompyuter: {deviceMismatchModal.currentDevice}</span>
             </div>
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-left text-[11px] text-amber-300 leading-relaxed">
               SubGame xavfsizlik qoidalariga ko‘ra, har bir litsenziya faqat <strong>1 ta kompyuterda</strong> ishlaydi. Noqonuniy nusxalash taqiqlanadi!

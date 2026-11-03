@@ -1,23 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import {
-  doc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  serverTimestamp,
-  collection,
-  query,
-  where,
-  onSnapshot
-} from 'firebase/firestore';
-import { db } from '../services/firebase';
+import React, { createContext, useCallback, useContext, useState, useEffect, useRef } from 'react';
 import type { GameLicense } from '../types';
-import { fetchFromBackend, clearTokens } from '../services/apiClient';
+import { ApiError, apiRequest, clearTokens, getAccessToken, setTokens } from '../services/apiClient';
 
-export const ADMIN_EMAILS = [
-  'azizbekgulomovweb@gmail.com',
-  'imuz21029@gmail.com'
-];
+const PAIRING_POLL_INTERVAL_MS = 2500;
+const USER_STORAGE_KEY = 'subgame_auth_user';
+const LICENSES_STORAGE_KEY = 'subgame_cached_licenses';
 
 export interface LauncherUserData {
   uid: string;
@@ -28,6 +15,15 @@ export interface LauncherUserData {
   isAdmin?: boolean;
 }
 
+export interface BindDeviceResult {
+  success: boolean;
+  message?: string;
+  isBoundToAnotherDevice?: boolean;
+  boundDeviceName?: string;
+  /** The server could not be reached, so nothing is known about the binding. */
+  offline?: boolean;
+}
+
 interface AuthContextType {
   user: LauncherUserData | null;
   isAdmin: boolean;
@@ -35,116 +31,115 @@ interface AuthContextType {
   cloudLicenses: Record<string, GameLicense>;
   pairingCode: string | null;
   isPairing: boolean;
+  pairingError: string | null;
   startDevicePairing: () => Promise<string>;
   cancelDevicePairing: () => void;
   openPairingInBrowser: (code: string) => void;
   signOut: () => Promise<void>;
+  refreshLicenses: () => Promise<Record<string, GameLicense> | null>;
   bindDeviceToLicense: (
     gameId: string,
     currentHwid: string,
     deviceName: string
-  ) => Promise<{ success: boolean; message?: string }>;
+  ) => Promise<BindDeviceResult>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function toLauncherUser(raw: any): LauncherUserData {
+  return {
+    uid: raw.uid || raw.id,
+    email: raw.email ?? null,
+    displayName: raw.displayName ?? null,
+    photoURL: raw.photoURL ?? null,
+    role: raw.role,
+    isAdmin: Boolean(raw.isAdmin),
+  };
+}
+
+function readCachedLicenses(): Record<string, GameLicense> {
+  try {
+    return JSON.parse(localStorage.getItem(LICENSES_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<LauncherUserData | null>(() => {
+    // Sessions from before the backend migration have no JWT and must pair again.
+    if (!getAccessToken()) return null;
     try {
-      const saved = localStorage.getItem('subgame_auth_user');
+      const saved = localStorage.getItem(USER_STORAGE_KEY);
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
     }
   });
 
-  const [loading, setLoading] = useState(false);
-  const [cloudLicenses, setCloudLicenses] = useState<Record<string, GameLicense>>({});
-  const [userProfile, setUserProfile] = useState<{ role?: string; isAdmin?: boolean } | null>(null);
+  const [loading] = useState(false);
+  const [cloudLicenses, setCloudLicenses] = useState<Record<string, GameLicense>>(() =>
+    user ? readCachedLicenses() : {}
+  );
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [isPairing, setIsPairing] = useState(false);
-  const pairingUnsubscribeRef = useRef<(() => void) | null>(null);
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const pairingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Sync user profile from Firestore users collection to detect admin role dynamically
-  useEffect(() => {
-    if (!user?.uid) {
-      setUserProfile(null);
-      return;
-    }
+  const isAdmin = Boolean(user && (user.role === 'admin' || user.isAdmin === true));
 
-    try {
-      const unsubscribeProfile = onSnapshot(
-        doc(db, 'users', user.uid),
-        (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            setUserProfile({
-              role: data.role,
-              isAdmin: Boolean(data.isAdmin || data.role === 'admin'),
-            });
-          }
-        },
-        (err) => {
-          console.warn('User profile sync error:', err);
-        }
-      );
-
-      return () => unsubscribeProfile();
-    } catch (e) {
-      console.warn('Could not subscribe to user profile:', e);
-    }
-  }, [user?.uid]);
-
-  const userEmail = (user?.email || '').trim().toLowerCase();
-  const isAdmin = Boolean(
-    user && (
-      ADMIN_EMAILS.some((e) => e.toLowerCase() === userEmail) ||
-      user.role === 'admin' ||
-      user.isAdmin === true ||
-      userProfile?.role === 'admin' ||
-      userProfile?.isAdmin === true
-    )
-  );
-
-  // Real-time Firestore sync of user licenses whenever user changes
-  useEffect(() => {
-    if (!user) {
-      setCloudLicenses({});
-      return;
-    }
-
-    try {
-      const q = query(collection(db, 'licenses'), where('userId', '==', user.uid));
-      const unsubscribeLicenses = onSnapshot(
-        q,
-        (snapshot) => {
-          const map: Record<string, GameLicense> = {};
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data() as GameLicense;
-            map[data.gameId] = {
-              ...data,
-              id: docSnap.id,
-            };
-          });
-          setCloudLicenses(map);
-        },
-        (error) => {
-          console.warn('Licenses sync error:', error);
-        }
-      );
-
-      return () => unsubscribeLicenses();
-    } catch (err) {
-      console.warn('Could not subscribe to licenses:', err);
-    }
-  }, [user]);
-
-  // Clean up pairing listener on unmount
-  useEffect(() => {
-    return () => {
-      pairingUnsubscribeRef.current?.();
-    };
+  const signOut = useCallback(async () => {
+    clearTokens();
+    localStorage.removeItem(USER_STORAGE_KEY);
+    localStorage.removeItem(LICENSES_STORAGE_KEY);
+    setUser(null);
+    setCloudLicenses({});
   }, []);
+
+  const refreshLicenses = useCallback(async (): Promise<Record<string, GameLicense> | null> => {
+    try {
+      const map = await apiRequest<Record<string, GameLicense>>('api/v1/licenses/my/');
+      setCloudLicenses(map);
+      localStorage.setItem(LICENSES_STORAGE_KEY, JSON.stringify(map));
+      return map;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        await signOut();
+      }
+      return null;
+    }
+  }, [signOut]);
+
+  // Refresh role and licenses on start, and whenever the user comes back to the launcher
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    apiRequest('api/v1/auth/me/')
+      .then((profile) => {
+        const fresh = toLauncherUser(profile);
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fresh));
+        setUser(fresh);
+      })
+      .catch((err) => console.warn('User profile sync error:', err));
+
+    refreshLicenses();
+
+    const onFocus = () => {
+      refreshLicenses();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [user?.uid, refreshLicenses]);
+
+  const stopPairingPoll = () => {
+    if (pairingTimerRef.current) {
+      clearInterval(pairingTimerRef.current);
+      pairingTimerRef.current = null;
+    }
+  };
+
+  // Clean up pairing poll on unmount
+  useEffect(() => stopPairingPoll, []);
 
   const openPairingInBrowser = (code: string) => {
     const url = `https://subgame.uz/connect?code=${code}`;
@@ -156,80 +151,80 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const startDevicePairing = async (): Promise<string> => {
-    pairingUnsubscribeRef.current?.();
-
-    // Generate random 6-digit code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setPairingCode(code);
+    stopPairingPoll();
+    setPairingError(null);
     setIsPairing(true);
 
     try {
-      const sessionRef = doc(db, 'device_sessions', code);
-      await setDoc(sessionRef, {
-        code,
-        status: 'pending',
-        createdAt: serverTimestamp(),
+      const session = await apiRequest<{ code: string; pollToken: string }>('api/v1/licenses/device/create/', {
+        method: 'POST',
+        body: JSON.stringify({}),
       });
+      setPairingCode(session.code);
 
       // Automatically open browser
-      openPairingInBrowser(code);
+      openPairingInBrowser(session.code);
 
-      // Listen for approval
-      const unsubscribe = onSnapshot(sessionRef, (docSnap) => {
-        if (!docSnap.exists()) return;
-        const data = docSnap.data();
+      pairingTimerRef.current = setInterval(async () => {
+        try {
+          const res = await apiRequest<{ status: string; user?: any; tokens?: { access: string; refresh: string } }>(
+            `api/v1/licenses/device/poll/${session.code}/`,
+            { method: 'POST', body: JSON.stringify({ pollToken: session.pollToken }) }
+          );
 
-        if (data?.status === 'approved' && data?.userData) {
-          const receivedUser: LauncherUserData = data.userData;
-          localStorage.setItem('subgame_auth_user', JSON.stringify(receivedUser));
-          setUser(receivedUser);
-          setIsPairing(false);
-          setPairingCode(null);
-          unsubscribe();
-
-          // Delete pairing session from Firestore
-          deleteDoc(sessionRef).catch(() => {});
+          if (res.status === 'approved' && res.tokens && res.user) {
+            stopPairingPoll();
+            setTokens(res.tokens.access, res.tokens.refresh);
+            const receivedUser = toLauncherUser(res.user);
+            localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(receivedUser));
+            setUser(receivedUser);
+            setIsPairing(false);
+            setPairingCode(null);
+          } else if (res.status !== 'pending') {
+            stopPairingPoll();
+            setIsPairing(false);
+            setPairingCode(null);
+            setPairingError('Ulanish kodining muddati tugadi. Qaytadan urinib ko‘ring.');
+          }
+        } catch (err) {
+          // A dropped connection is retried on the next tick
+          if (err instanceof ApiError && err.status !== 0) {
+            stopPairingPoll();
+            setIsPairing(false);
+            setPairingCode(null);
+            setPairingError(err.message);
+          }
         }
-      });
+      }, PAIRING_POLL_INTERVAL_MS);
 
-      pairingUnsubscribeRef.current = unsubscribe;
-      return code;
-    } catch (err) {
+      return session.code;
+    } catch (err: any) {
       console.error('Failed to start device pairing:', err);
       setIsPairing(false);
       setPairingCode(null);
+      setPairingError(err?.message || 'Launcherni ulashda xatolik yuz berdi.');
       throw err;
     }
   };
 
   const cancelDevicePairing = () => {
-    pairingUnsubscribeRef.current?.();
-    if (pairingCode) {
-      deleteDoc(doc(db, 'device_sessions', pairingCode)).catch(() => {});
-    }
+    stopPairingPoll();
     setPairingCode(null);
     setIsPairing(false);
-  };
-
-  const signOut = async () => {
-    clearTokens();
-    localStorage.removeItem('subgame_auth_user');
-    setUser(null);
-    setCloudLicenses({});
   };
 
   const bindDeviceToLicense = async (
     gameId: string,
     currentHwid: string,
     deviceName: string
-  ): Promise<{ success: boolean; message?: string }> => {
+  ): Promise<BindDeviceResult> => {
     if (!user) {
       return { success: false, message: 'Iltimos, avval hisobingizga kiring.' };
     }
 
-    // 1. Try binding via Django Backend (1-PC Hardware DRM)
+    // The backend is the only authority on which machine owns a license.
     try {
-      const backendRes = await fetchFromBackend<{ success: boolean; message?: string }>('api/v1/licenses/bind-hwid/', {
+      await apiRequest('api/v1/licenses/bind-hwid/', {
         method: 'POST',
         body: JSON.stringify({
           gameId,
@@ -237,40 +232,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           deviceName: deviceName || 'Asosiy PC',
         }),
       });
-      if (backendRes && !backendRes.success) {
-        return backendRes;
-      }
-    } catch (e) {
-      console.warn('[Backend] HWID bind warning, syncing to Firestore:', e);
-    }
-
-    const license = cloudLicenses[gameId];
-    if (license?.hwid) {
-      if (license.hwid === currentHwid) {
-        return { success: true };
-      } else {
+      await refreshLicenses();
+      return { success: true };
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 401) {
+          await signOut();
+          return { success: false, message: 'Sessiya tugagan. Iltimos, qaytadan kiring.' };
+        }
         return {
           success: false,
-          message: `Ushbu litsenziya allaqachon boshqa qurilmaga bog‘langan (${license.boundDeviceName || 'Boshqa kompyuter'}). 1 ta litsenziya faqat 1 ta qurilmada amal qiladi!`,
+          message: err.message,
+          offline: err.status === 0,
+          isBoundToAnotherDevice: Boolean(err.data?.isBoundToAnotherDevice),
+          boundDeviceName: err.data?.boundDeviceName || undefined,
         };
       }
-    }
-
-    // Bind this machine's HWID to Firestore fallback
-    try {
-      const licenseRef = doc(db, 'licenses', `${user.uid}_${gameId}`);
-      await updateDoc(licenseRef, {
-        hwid: currentHwid,
-        boundDeviceName: deviceName || 'Asosiy PC',
-        boundAt: serverTimestamp(),
-      });
-      return { success: true };
-    } catch (err: any) {
-      console.warn('Failed to bind HWID to Firestore, falling back to local binding:', err);
-      try {
-        localStorage.setItem(`subgame_bound_${user.uid}_${gameId}`, currentHwid);
-      } catch {}
-      return { success: true };
+      return { success: false, message: 'Litsenziyani tekshirishda xatolik yuz berdi.' };
     }
   };
 
@@ -283,10 +261,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         cloudLicenses,
         pairingCode,
         isPairing,
+        pairingError,
         startDevicePairing,
         cancelDevicePairing,
         openPairingInBrowser,
         signOut,
+        refreshLicenses,
         bindDeviceToLicense,
       }}
     >

@@ -33,7 +33,7 @@ function createWindow() {
 
   // Handle Google OAuth Popups in Electron
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.includes('accounts.google.com') || url.includes('firebaseapp.com') || url.includes('oauth')) {
+    if (url.includes('accounts.google.com') || url.includes('oauth')) {
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {

@@ -21,7 +21,7 @@ export interface GameLaunchConfig {
   subtitleDownloadUrl?: string; // Real-time server URL for dynamically added games
   isAuthorized?: boolean;
   skipSubtitleInjection?: boolean; // For standalone games or games that don't need external subtitle injection
-  subtitleVersion?: string; // Real-time subtitle version from Firestore (e.g. "v1.1.0")
+  subtitleVersion?: string; // Real-time subtitle version from the backend (e.g. "v1.1.0")
 }
 
 interface RunningGameSession {

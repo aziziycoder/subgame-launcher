@@ -1,6 +1,3 @@
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from './firebase';
-
 export interface AppUpdateInfo {
   version: string;
   downloadUrl: string;
@@ -28,7 +25,7 @@ export function compareVersions(a: string, b: string): number {
 }
 
 /**
- * Checks for launcher update from Firestore (or fallback JSON on subgame.uz)
+ * Checks for launcher update from the version file published on subgame.uz
  */
 export async function checkForAppUpdate(): Promise<{
   updateAvailable: boolean;
@@ -38,24 +35,6 @@ export async function checkForAppUpdate(): Promise<{
 }> {
   const currentVersion = (await window.subgame?.getAppVersion()) || '1.0.0';
 
-  // 1. Try Firestore
-  try {
-    const ref = doc(db, 'appConfig', 'launcher');
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-      const data = snap.data() as AppUpdateInfo;
-      if (data && data.version) {
-        const updateAvailable = compareVersions(data.version, currentVersion) > 0;
-        // Barcha yangilanishlar doimiy majburiy (majburiy update)
-        const isForceUpdate = updateAvailable;
-        return { updateAvailable, isForceUpdate, currentVersion, latestInfo: data };
-      }
-    }
-  } catch (err) {
-    console.warn('[UpdateService] Firestore check failed, checking fallback URL:', err);
-  }
-
-  // 2. Fallback to website JSON
   try {
     const res = await fetch(`https://www.subgame.uz/downloads/version.json?t=${Date.now()}`);
     if (res.ok) {
@@ -68,7 +47,7 @@ export async function checkForAppUpdate(): Promise<{
       }
     }
   } catch (netErr) {
-    console.warn('[UpdateService] Fallback check failed:', netErr);
+    console.warn('[UpdateService] Update check failed:', netErr);
   }
 
   return { updateAvailable: false, isForceUpdate: false, currentVersion };
