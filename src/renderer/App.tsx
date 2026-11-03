@@ -9,6 +9,7 @@ import { LAUNCHER_GAMES, LauncherGame } from './data/launcherGames';
 import { fetchLauncherGames } from './services/gamesService';
 import { checkForAppUpdate, AppUpdateInfo } from './services/updateService';
 import { useAuth } from './context/AuthContext';
+import { getStableHardwareInfo } from './services/deviceIdentity';
 import {
   Gamepad2,
   Cpu,
@@ -96,7 +97,7 @@ export function App() {
 
   const loadData = async () => {
     if (window.subgame) {
-      const hwid = await window.subgame.getHardwareId();
+      const hwid = await getStableHardwareInfo();
       setHwidInfo(hwid);
 
       const lic = await window.subgame.getLicenses();
@@ -209,7 +210,7 @@ export function App() {
       return;
     }
 
-    const currentHardware = hwidInfo || (await window.subgame?.getHardwareId());
+    const currentHardware = hwidInfo || (await getStableHardwareInfo());
     if (!currentHardware?.hwid) {
       setDeviceBindingLoading(false);
       setUpdateToast('Kompyuter identifikatorini aniqlab bo‘lmadi. Launcherni qayta ishga tushiring.');
