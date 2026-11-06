@@ -10,6 +10,67 @@ import { launchGameWithProtection, injectSubtitleFile } from './gameRunner';
 
 let mainWindow: BrowserWindow | null = null;
 
+function compareSemver(a: string, b: string): number {
+  const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0) ? 1 : -1;
+  }
+  return 0;
+}
+
+/**
+ * To'liq (exe) yangilanishdan keyin userData/update ichida eski tez-yangilanish (UI patch) qolib ketsa,
+ * launcher o'zini eski versiya deb ko'rsatadi va majburiy yangilanish cheksiz takrorlanadi.
+ * Ilova versiyasidan eski bo'lgan UI patchni o'chirib tashlaymiz.
+ */
+function dropStaleUiPatch(): void {
+  const updateDir = path.join(app.getPath('userData'), 'update');
+  const verFile = path.join(updateDir, 'dist', 'version.json');
+  try {
+    if (!fs.existsSync(verFile)) return;
+    const v = JSON.parse(fs.readFileSync(verFile, 'utf8'))?.version;
+    if (!v || compareSemver(v, app.getVersion()) < 0) {
+      fs.rmSync(updateDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.warn('Stale UI patch cleanup warning:', err);
+  }
+}
+
+/** Portable launcher bo'lsa, foydalanuvchi ishga tushirgan asl .exe fayl yo'li */
+function launcherExePath(): string {
+  return process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+}
+
+/**
+ * 1.3.0 va undan eski launcherlar to'liq yangilanishni portable faylning o'rniga emas, %TEMP% dagi
+ * vaqtinchalik nusxaga yozardi. Shunday ishga tushgan bo'lsak, o'zimizni ish stoliga saqlaymiz va
+ * foydalanuvchiga bundan keyin shu fayldan ochishni aytamiz (aks holda eski fayl har safar yangilanish so'raydi).
+ */
+async function rescueFromTempLaunch(): Promise<void> {
+  try {
+    const exe = process.env.PORTABLE_EXECUTABLE_FILE;
+    if (!exe || !app.isPackaged) return;
+    const tmp = path.resolve(app.getPath('temp')).toLowerCase();
+    if (!path.resolve(exe).toLowerCase().startsWith(tmp)) return;
+
+    const desktopExe = path.join(app.getPath('desktop'), 'SubGame Launcher.exe');
+    if (path.resolve(desktopExe).toLowerCase() === path.resolve(exe).toLowerCase()) return;
+    fs.copyFileSync(exe, desktopExe);
+    await dialog.showMessageBox({
+      type: 'info',
+      title: 'SubGame Launcher yangilandi',
+      message: `SubGame Launcher ${app.getVersion()} ga yangilandi.`,
+      detail:
+        "Yangi launcher ish stolingizga \"SubGame Launcher.exe\" nomi bilan saqlandi. Bundan keyin launcherni shu fayldan oching. Eski launcher faylini o'chirib tashlashingiz mumkin.",
+      buttons: ['Tushunarli'],
+    });
+  } catch (err) {
+    console.warn('Temp launch rescue warning:', err);
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -86,7 +147,9 @@ app.whenReady().then(() => {
     callback({ cancel: false, requestHeaders: details.requestHeaders });
   });
 
+  dropStaleUiPatch();
   createWindow();
+  void rescueFromTempLaunch();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -310,7 +373,7 @@ ipcMain.handle('apply-update', async (_, tempPath: string) => {
     }
 
     // 2. Full .exe update (fallback)
-    const currentExe = process.execPath;
+    const currentExe = launcherExePath();
     const oldPid = process.pid;
 
     const escapedTemp = tempPath.replace(/'/g, "''");

@@ -6,10 +6,13 @@ import http from 'http';
 import { app } from 'electron';
 import { isGameActivated } from './license';
 import { decryptData } from './crypto';
+import { isRangePatch, applyRangePatch, restoreRangePatch, POWERSHELL_RANGE_RESTORE } from './rangePatch';
 
 export interface InjectedFileInfo {
   destFilePath: string;
   backupFilePath?: string;
+  /** 'range' - fayl joyida bayt-patch qilingan (SGPATCH1); uni hech qachon o'chirmaslik kerak */
+  kind?: 'file' | 'range';
 }
 
 export interface GameLaunchConfig {
@@ -30,6 +33,20 @@ interface RunningGameSession {
 }
 
 const activeSessions = new Map<string, RunningGameSession>();
+
+/**
+ * Foydalanuvchiga ko'rsatiladigan xato matnidan fayl yo'llari va nomlarini olib tashlaydi
+ * (qaysi fayl yuklanayotgani/qo'yilayotgani launcherda ko'rinmasligi kerak).
+ */
+function hideFileDetails(err: any): string {
+  const msg = String(err?.message || err || '');
+  return msg
+    .replace(/[A-Za-z]:[\\/][^\s'"`,;)]+/g, '')
+    .replace(/'[^']*[\\/][^']*'/g, '')
+    .replace(/\b[\w.-]+\.(psarc|pak|enc|sds|pc|rpf|assets|swf|patch|subgame_\w+)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 
 /**
  * Windows jarayonini tekshirish (tasklist orqali)
@@ -58,15 +75,15 @@ export function spawnDetachedCleanupWatcher(
   legacyBackupPath?: string
 ): void {
   try {
-    const fileEntries: Array<{ dest: string; bak: string }> = Array.isArray(filesOrDest)
-      ? filesOrDest.map((f) => ({ dest: f.destFilePath, bak: f.backupFilePath || '' }))
-      : [{ dest: filesOrDest, bak: legacyBackupPath || '' }];
+    const fileEntries: Array<{ dest: string; bak: string; kind: string }> = Array.isArray(filesOrDest)
+      ? filesOrDest.map((f) => ({ dest: f.destFilePath, bak: f.backupFilePath || '', kind: f.kind || 'file' }))
+      : [{ dest: filesOrDest, bak: legacyBackupPath || '', kind: 'file' }];
 
     if (fileEntries.length === 0) return;
 
     const escapedPattern = pattern.replace(/'/g, "''");
     const fileArrayScript = fileEntries
-      .map((f) => `@{ dest = '${f.dest.replace(/'/g, "''")}'; bak = '${f.bak.replace(/'/g, "''")}' }`)
+      .map((f) => `@{ dest = '${f.dest.replace(/'/g, "''")}'; bak = '${f.bak.replace(/'/g, "''")}'; kind = '${f.kind}' }`)
       .join(', ');
 
     const psCommand = `
@@ -84,7 +101,12 @@ export function spawnDetachedCleanupWatcher(
       foreach ($f in $files) {
         for ($i = 0; $i -lt 15; $i++) {
           try {
-            if ($f.bak -and (Test-Path -LiteralPath $f.bak)) {
+            if ($f.kind -eq 'range') {
+              if ($f.bak -and (Test-Path -LiteralPath $f.bak)) {
+                $dest = $f.dest; $bak = $f.bak;
+                ${POWERSHELL_RANGE_RESTORE}
+              }
+            } elseif ($f.bak -and (Test-Path -LiteralPath $f.bak)) {
               Copy-Item -LiteralPath $f.bak -Destination $f.dest -Force;
               Remove-Item -LiteralPath $f.bak -Force;
             } elseif (Test-Path -LiteralPath $f.dest) {
@@ -573,11 +595,42 @@ export async function injectSubtitleFile(
       if (!source) {
         return {
           success: false,
-          message: `Subtitr manba fayli topilmadi: ${targetFileName}. O'yin identifikatori: ${config.gameId}`,
+          message: "O'zbekcha paket topilmadi. Internet aloqasini tekshirib, qaytadan urinib ko'ring.",
         };
       }
 
-      onStatusUpdate?.(`Subtitr fayli (${targetFileName}) o'yin papkasiga xavfsiz ulanmoqda...`);
+      onStatusUpdate?.("O'zbekcha paket o'yinga xavfsiz ulanmoqda...");
+
+      // Bayt-oraliq patchi (SGPATCH1): katta arxivlarni butunlay nusxalamay, joyida patchlaymiz
+      let sourceBuffer: Buffer | null = null;
+      try {
+        const rawBuf = fs.readFileSync(source.path);
+        try {
+          sourceBuffer = decryptData(rawBuf);
+        } catch {
+          sourceBuffer = source.isEncrypted ? null : rawBuf;
+        }
+      } catch {}
+
+      if (isRangePatch(sourceBuffer)) {
+        if (!fs.existsSync(destFilePath)) {
+          return {
+            success: false,
+            message: "O'yin fayllari to'liq emas. O'yin papkasini to'g'ri tanlaganingizni tekshiring.",
+          };
+        }
+        const rangeBackupPath = `${destFilePath}.subgame_rangebak`;
+        try {
+          applyRangePatch(destFilePath, sourceBuffer as Buffer, rangeBackupPath);
+        } catch (patchErr: any) {
+          return {
+            success: false,
+            message: `O'zbekcha paketni ulab bo'lmadi: ${hideFileDetails(patchErr)}`,
+          };
+        }
+        injectedList.push({ destFilePath, backupFilePath: rangeBackupPath, kind: 'range' });
+        continue;
+      }
 
       // Agar o'yin papkasida asl fayl mavjud bo'lsa va hali zaxiralanmagan bo'lsa, zaxiraga olamiz
       if (fs.existsSync(destFilePath) && !fs.existsSync(backupFilePath)) {
@@ -624,7 +677,7 @@ export async function injectSubtitleFile(
   } catch (error: any) {
     return {
       success: false,
-      message: `Subtitrni joylashda xatolik: ${error?.message || error}`,
+      message: `Subtitrni joylashda xatolik: ${hideFileDetails(error)}`,
     };
   }
 }
@@ -724,6 +777,11 @@ export async function launchGameWithProtection(
             if (!item.destFilePath || item.destFilePath === config.gameExePath) continue;
             for (let attempt = 0; attempt < 10; attempt++) {
               try {
+                if (item.kind === 'range') {
+                  // Arxivni hech qachon o'chirmaymiz: faqat asl baytlarni qaytaramiz
+                  if (item.backupFilePath) restoreRangePatch(item.destFilePath, item.backupFilePath);
+                  break;
+                }
                 if (item.backupFilePath && fs.existsSync(item.backupFilePath)) {
                   safeCopyFileSync(item.backupFilePath, item.destFilePath);
                   try { fs.unlinkSync(item.backupFilePath); } catch {}
@@ -750,7 +808,7 @@ export async function launchGameWithProtection(
   } catch (error: any) {
     return {
       success: false,
-      message: `Ishga tushirishda xatolik: ${error?.message || error}`,
+      message: `Ishga tushirishda xatolik: ${hideFileDetails(error)}`,
     };
   }
 }
