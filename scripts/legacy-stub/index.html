@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<title>SubGame Launcher</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #090d16; color: #e5e7eb;
+    font-family: "Segoe UI", system-ui, sans-serif; }
+  .bar { height: 40px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 8px 0 16px; -webkit-app-region: drag; border-bottom: 1px solid #1f2533; }
+  .bar b { font-size: 13px; color: #9ca3af; font-weight: 600; letter-spacing: .02em; }
+  .bar button { -webkit-app-region: no-drag; background: none; border: 0; color: #9ca3af;
+    width: 40px; height: 32px; font-size: 16px; cursor: pointer; border-radius: 6px; }
+  .bar button:hover { background: #1f2533; color: #fff; }
+  .bar button.x:hover { background: #dc2626; }
+  main { height: calc(100% - 40px); display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .card { max-width: 560px; width: 100%; background: #10151f; border: 1px solid #2a3245;
+    border-radius: 16px; padding: 32px; }
+  h1 { margin: 0 0 12px; font-size: 22px; color: #fff; }
+  p { margin: 0 0 12px; line-height: 1.6; color: #c7ccd6; font-size: 14px; }
+  ol { margin: 0 0 20px; padding-left: 20px; line-height: 1.8; color: #c7ccd6; font-size: 14px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; background: #a3e635; color: #0b0d12;
+    font-weight: 700; border: 0; border-radius: 10px; padding: 12px 20px; font-size: 15px; cursor: pointer; }
+  .btn:hover { background: #84cc16; }
+  .link { margin-top: 14px; font-size: 12px; color: #6b7280; word-break: break-all; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <b>SubGame Launcher</b>
+    <span>
+      <button onclick="ctl('minimize')" title="Kichraytirish">&#8211;</button>
+      <button class="x" onclick="ctl('close')" title="Yopish">&#10005;</button>
+    </span>
+  </div>
+  <main>
+    <div class="card">
+      <h1>Yangi launcherni yuklab oling</h1>
+      <p>SubGame Launcherning yangi versiyasi chiqdi. Bu versiyani avtomatik o'rnatib bo'lmaydi, uni bir marta saytdan qo'lda yuklab olish kerak.</p>
+      <ol>
+        <li>Pastdagi tugmani bosing - yangi launcher yuklab olinadi.</li>
+        <li>Yuklangan <b>SubGame-Launcher.exe</b> faylini ish stoliga qo'ying va shu fayldan oching.</li>
+        <li>Eski launcher faylini o'chirib tashlang.</li>
+      </ol>
+      <p>Litsenziyalaringiz va o'yinlaringiz saqlanib qoladi.</p>
+      <button class="btn" onclick="dl()">Yangi launcherni yuklab olish</button>
+      <div class="link">https://www.subgame.uz/downloads/SubGame-Launcher.exe</div>
+    </div>
+  </main>
+<script>
+  var URL_EXE = 'https://www.subgame.uz/downloads/SubGame-Launcher.exe';
+  function dl() {
+    try { if (window.subgame && window.subgame.openExternal) { window.subgame.openExternal(URL_EXE); return; } } catch (e) {}
+    window.open(URL_EXE, '_blank');
+  }
+  function ctl(a) {
+    try { if (window.subgame && window.subgame.windowControl) { window.subgame.windowControl(a); return; } } catch (e) {}
+    if (a === 'close') window.close();
+  }
+</script>
+</body>
+</html>
