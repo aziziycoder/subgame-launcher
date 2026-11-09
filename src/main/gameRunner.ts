@@ -1,4 +1,4 @@
-import { spawn, ChildProcess, execSync, execFileSync } from 'child_process';
+import { spawn, ChildProcess, execSync, execFile, execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
@@ -28,7 +28,7 @@ export interface GameLaunchConfig {
 }
 
 interface RunningGameSession {
-  process: ChildProcess;
+  process: ChildProcess | null; // null when the game was started elevated through UAC
   gameId: string;
 }
 
@@ -685,6 +685,69 @@ export async function injectSubtitleFile(
 /**
  * O'yinni o'zbekcha subtitrlar bilan ishga tushirish (A-Variant DRM)
  */
+/**
+ * O'yin papkasiga qo'yilgan fayllarni asl holiga qaytaradi (zaxiradan tiklaydi yoki o'chiradi).
+ */
+async function restoreInjectedFiles(injectedList: InjectedFileInfo[], gameExePath: string): Promise<void> {
+  for (const item of injectedList) {
+    if (!item.destFilePath || item.destFilePath === gameExePath) continue;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        if (item.kind === 'range') {
+          // Arxivni hech qachon o'chirmaymiz: faqat asl baytlarni qaytaramiz
+          if (item.backupFilePath) restoreRangePatch(item.destFilePath, item.backupFilePath);
+          break;
+        }
+        if (item.backupFilePath && fs.existsSync(item.backupFilePath)) {
+          safeCopyFileSync(item.backupFilePath, item.destFilePath);
+          try { fs.unlinkSync(item.backupFilePath); } catch {}
+          break;
+        } else if (fs.existsSync(item.destFilePath)) {
+          fs.unlinkSync(item.destFilePath);
+          break;
+        }
+      } catch {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  }
+}
+
+/**
+ * O'yin exe'sini oddiy jarayon sifatida ishga tushiradi.
+ * Windows jarayonni yaratgach resolve bo'ladi, rad etsa spawn xatosi bilan reject bo'ladi
+ * (xato 'error' hodisasida keladi, uni ushlamasak main process qulaydi).
+ */
+function spawnGameProcess(exePath: string, cwd: string): Promise<ChildProcess> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exePath, [], { cwd, detached: true, stdio: 'ignore' });
+    child.once('spawn', () => {
+      child.unref();
+      resolve(child);
+    });
+    child.once('error', reject);
+  });
+}
+
+/**
+ * Exe "Administrator sifatida ishga tushirish" deb belgilangan bo'lsa (Compatibility sozlamasi
+ * yoki manifest), oddiy spawn Windows 740 xatosi bilan rad etiladi — Node buni EACCES deb beradi.
+ * Bunday holda UAC oynasi orqali ishga tushiramiz. Foydalanuvchi rad etsa, reject bo'ladi.
+ */
+function startGameElevated(exePath: string, cwd: string): Promise<void> {
+  const quote = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  const command = `Start-Process -FilePath ${quote(exePath)} -WorkingDirectory ${quote(cwd)} -Verb RunAs`;
+  return new Promise((resolve, reject) => {
+    execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', command], { windowsHide: true }, (err) =>
+      err ? reject(err) : resolve()
+    );
+  });
+}
+
+function needsElevation(err: any): boolean {
+  return err?.code === 'EACCES' || err?.errno === 740 || err?.errno === -4092;
+}
+
 export async function launchGameWithProtection(
   config: GameLaunchConfig,
   onStatusUpdate: (status: any) => void
@@ -734,13 +797,30 @@ export async function launchGameWithProtection(
     }
 
     // 4. Launch Game process
-    const gameProcess = spawn(config.gameExePath, [], {
-      cwd: gameDir,
-      detached: true,
-      stdio: 'ignore',
-    });
-
-    gameProcess.unref();
+    let gameProcess: ChildProcess | null = null;
+    try {
+      gameProcess = await spawnGameProcess(config.gameExePath, gameDir);
+    } catch (spawnErr: any) {
+      let started = false;
+      if (needsElevation(spawnErr)) {
+        onStatusUpdate("O'yin administrator ruxsatini so'rayapti...");
+        try {
+          await startGameElevated(config.gameExePath, gameDir);
+          started = true;
+        } catch {}
+      }
+      if (!started) {
+        if (shouldInject && injectedList.length > 0) {
+          await restoreInjectedFiles(injectedList, config.gameExePath);
+        }
+        return {
+          success: false,
+          message: needsElevation(spawnErr)
+            ? "O'yin administrator ruxsatisiz ishga tushmaydi. So'rov oynasida \"Ha\" ni bosing yoki o'yin exe faylining Compatibility sozlamasidan \"Run this program as an administrator\" belgisini olib tashlang."
+            : `O'yinni ishga tushirib bo'lmadi: ${hideFileDetails(spawnErr)}`,
+        };
+      }
+    }
 
     activeSessions.set(config.gameId, {
       process: gameProcess,
@@ -773,28 +853,7 @@ export async function launchGameWithProtection(
         onStatusUpdate("O'yin yakunlandi. Subtitrlar himoyalanmoqda...");
 
         if (shouldInject && injectedList.length > 0) {
-          for (const item of injectedList) {
-            if (!item.destFilePath || item.destFilePath === config.gameExePath) continue;
-            for (let attempt = 0; attempt < 10; attempt++) {
-              try {
-                if (item.kind === 'range') {
-                  // Arxivni hech qachon o'chirmaymiz: faqat asl baytlarni qaytaramiz
-                  if (item.backupFilePath) restoreRangePatch(item.destFilePath, item.backupFilePath);
-                  break;
-                }
-                if (item.backupFilePath && fs.existsSync(item.backupFilePath)) {
-                  safeCopyFileSync(item.backupFilePath, item.destFilePath);
-                  try { fs.unlinkSync(item.backupFilePath); } catch {}
-                  break;
-                } else if (fs.existsSync(item.destFilePath)) {
-                  fs.unlinkSync(item.destFilePath);
-                  break;
-                }
-              } catch {
-                await new Promise((r) => setTimeout(r, 1000));
-              }
-            }
-          }
+          await restoreInjectedFiles(injectedList, config.gameExePath);
         }
 
         onStatusUpdate('Tayyor');
