@@ -63,7 +63,8 @@ export interface SubGameApi {
   openExternal: (url: string) => void;
   getAppVersion: () => Promise<string>;
   downloadUpdate: (url: string) => Promise<{ success: boolean; tempPath?: string; error?: string }>;
-  applyUpdate: (tempPath: string) => Promise<{ success: boolean; error?: string }>;
+  applyUpdate: (tempPath: string) => Promise<{ success: boolean; error?: string; fallbackToFull?: boolean }>;
+  getUpdateInfo?: () => Promise<{ builtinVersion: string; blockedPatchVersions: string[] }>;
   onUpdateProgress: (callback: (progress: { percent: number; transferred: number; total: number }) => void) => () => void;
 }
 

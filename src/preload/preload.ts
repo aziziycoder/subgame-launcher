@@ -25,7 +25,8 @@ export interface SubGameApi {
   openExternal: (url: string) => void;
   getAppVersion: () => Promise<string>;
   downloadUpdate: (url: string) => Promise<{ success: boolean; tempPath?: string; error?: string }>;
-  applyUpdate: (tempPath: string) => Promise<{ success: boolean; error?: string }>;
+  applyUpdate: (tempPath: string) => Promise<{ success: boolean; error?: string; fallbackToFull?: boolean }>;
+  getUpdateInfo: () => Promise<{ builtinVersion: string; blockedPatchVersions: string[] }>;
   onUpdateProgress: (callback: (progress: { percent: number; transferred: number; total: number }) => void) => () => void;
 }
 
@@ -50,6 +51,7 @@ const api: SubGameApi = {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   downloadUpdate: (url: string) => ipcRenderer.invoke('download-update', url),
   applyUpdate: (tempPath: string) => ipcRenderer.invoke('apply-update', tempPath),
+  getUpdateInfo: () => ipcRenderer.invoke('get-update-info'),
   onUpdateProgress: (callback) => {
     const handler = (_: any, progress: any) => callback(progress);
     ipcRenderer.on('update-progress', handler);

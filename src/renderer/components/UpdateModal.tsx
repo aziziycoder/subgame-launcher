@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, ArrowRight, DownloadCloud, Loader2, RefreshCw, X, AlertCircle, CheckCircle2, Zap } from 'lucide-react';
-import { AppUpdateInfo } from '../services/updateService';
+import { AppUpdateInfo, compareVersions } from '../services/updateService';
 
 interface UpdateModalProps {
   currentVersion: string;
@@ -22,6 +22,26 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
   const [downloadedTempPath, setDownloadedTempPath] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Kichik patch faqat exe'si patchdan main kodni yuklay oladigan (patchBaseVersion va undan yangi)
+  // launcherlarga beriladi va avval ishlamay qolgan patch versiyasi qayta berilmaydi.
+  const [isPatch, setIsPatch] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!latestInfo.patchUrl || !latestInfo.patchBaseVersion) return;
+      try {
+        const info = await window.subgame?.getUpdateInfo?.();
+        if (!info || cancelled) return;
+        const supported = compareVersions(info.builtinVersion, latestInfo.patchBaseVersion) >= 0;
+        const blocked = info.blockedPatchVersions.includes(latestInfo.version);
+        setIsPatch(supported && !blocked);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [latestInfo]);
 
   useEffect(() => {
     const unsub = window.subgame?.onUpdateProgress((p) => {
@@ -38,7 +58,6 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     };
   }, []);
 
-  const isPatch = Boolean(latestInfo.patchUrl);
 
   const handleStartDownload = async () => {
     setDownloading(true);
@@ -46,7 +65,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     setProgress(0);
 
     try {
-      const targetUrl = latestInfo.patchUrl || latestInfo.downloadUrl;
+      const targetUrl = isPatch && latestInfo.patchUrl ? latestInfo.patchUrl : latestInfo.downloadUrl;
       const res = await window.subgame?.downloadUpdate(targetUrl);
       if (res?.success && res.tempPath) {
         setDownloadedTempPath(res.tempPath);
@@ -70,6 +89,11 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
       if (!res?.success) {
         setError(res?.error || 'Yangilanishni qo‘llashda xatolik');
         setApplying(false);
+        if (res?.fallbackToFull) {
+          // Patch tekshiruvdan o'tmadi: keyingi urinishda to'liq exe yuklanadi
+          setIsPatch(false);
+          setDownloadedTempPath(null);
+        }
       }
     } catch (err: any) {
       setError(err?.message || 'Qayta ishga tushirishda xatolik');

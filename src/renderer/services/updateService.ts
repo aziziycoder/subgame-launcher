@@ -6,6 +6,9 @@ export interface AppUpdateInfo {
   changelog: string;
   releaseDate?: string;
   minRequiredVersion?: string;
+  // Kichik patchni o'rnata oladigan eng eski exe versiyasi (main kodni patchdan yuklovchi bootstrap
+  // shu versiyadan boshlab bor). Undan eski exe'lar to'liq yangilanishni oladi.
+  patchBaseVersion?: string;
 }
 
 /**

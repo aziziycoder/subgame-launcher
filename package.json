@@ -3,7 +3,7 @@
   "version": "1.4.1",
   "private": true,
   "description": "SubGame Official Desktop Launcher & DRM Security System",
-  "main": "dist-electron/main/main.js",
+  "main": "dist-electron/main/bootstrap.js",
   "scripts": {
     "dev": "vite",
     "start": "electron .",

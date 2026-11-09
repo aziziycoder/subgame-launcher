@@ -7,17 +7,9 @@ import { spawn } from 'child_process';
 import { getHardwareId } from './hwid';
 import { loadLicenseStore, activateLicense } from './license';
 import { launchGameWithProtection, injectSubtitleFile } from './gameRunner';
+import { compareSemver, verifyPatchDir, readBlockedPatchVersions } from './patchVerify';
 
 let mainWindow: BrowserWindow | null = null;
-
-function compareSemver(a: string, b: string): number {
-  const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
-  const pb = String(b).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0) ? 1 : -1;
-  }
-  return 0;
-}
 
 /**
  * To'liq (exe) yangilanishdan keyin userData/update ichida eski tez-yangilanish (UI patch) qolib ketsa,
@@ -79,7 +71,7 @@ function createWindow() {
     minHeight: 680,
     frame: false, // Frameless custom modern gaming UI
     backgroundColor: '#090d16',
-    icon: path.join(__dirname, '../../public/icon.ico'),
+    icon: path.join(app.getAppPath(), 'dist', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       nodeIntegration: false,
@@ -119,21 +111,25 @@ function createWindow() {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
     // In production packaged app, check if a lightweight delta patch update exists in userData
+    // exe ichidagi interfeys. app.getAppPath() ishlatiladi: main kod patchdan yuklanganda
+    // __dirname userData ichini ko'rsatadi.
+    const indexPath = path.join(app.getAppPath(), 'dist', 'index.html');
     const userUpdateIndex = path.join(app.getPath('userData'), 'update', 'dist', 'index.html');
-    if (app.isPackaged && fs.existsSync(userUpdateIndex)) {
+    const patchesActive = app.isPackaged || process.env.SUBGAME_DEV_PATCHES === '1';
+    if (patchesActive && fs.existsSync(userUpdateIndex)) {
       mainWindow.loadFile(userUpdateIndex).catch((err) => {
         console.warn('Failed to load user update index, falling back to bundled:', err);
-        const indexPath = path.join(__dirname, '../../dist/index.html');
         mainWindow?.loadFile(indexPath);
       });
     } else {
-      const indexPath = path.join(__dirname, '../../dist/index.html');
-      mainWindow.loadFile(indexPath).catch(() => {
-        // If built differently
-        mainWindow?.loadURL(`file://${path.resolve(__dirname, '../dist/index.html')}`);
-      });
+      mainWindow.loadFile(indexPath);
     }
   }
+
+  // Oyna ochildi: patchdan yuklangan bo'lsak, bootstrapga patch ishlayotganini bildiramiz
+  mainWindow.webContents.once('did-finish-load', () => {
+    globalThis.__subgameConfirmBoot?.();
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -271,6 +267,12 @@ ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
 
+// IPC: Yangilanish turini tanlash uchun ma'lumot (kichik patch yoki to'liq exe)
+ipcMain.handle('get-update-info', () => ({
+  builtinVersion: app.getVersion(),
+  blockedPatchVersions: readBlockedPatchVersions(app.getPath('userData')),
+}));
+
 // IPC: Download Launcher Update with progress (Supports both .zip patch and .exe full update)
 ipcMain.handle('download-update', async (_, downloadUrl: string) => {
   try {
@@ -338,17 +340,19 @@ ipcMain.handle('apply-update', async (_, tempPath: string) => {
 
     // 1. Fast Delta Patch Update (.zip)
     if (tempPath.toLowerCase().endsWith('.zip')) {
-      const updateDistDir = path.join(app.getPath('userData'), 'update', 'dist');
-      if (!fs.existsSync(updateDistDir)) {
-        fs.mkdirSync(updateDistDir, { recursive: true });
-      }
+      const userData = app.getPath('userData');
+      const updateDir = path.join(userData, 'update');
+      const updateDistDir = path.join(updateDir, 'dist');
+      const stagingDir = path.join(updateDir, 'staging');
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+      fs.mkdirSync(stagingDir, { recursive: true });
 
       const { execSync } = require('child_process');
       let extracted = false;
 
       // Try tar.exe (native on modern Windows)
       try {
-        execSync(`tar -xf "${tempPath}" -C "${updateDistDir}"`, { stdio: 'ignore' });
+        execSync(`tar -xf "${tempPath}" -C "${stagingDir}"`, { stdio: 'ignore' });
         extracted = true;
       } catch {
         // Fallback to powershell Expand-Archive
@@ -356,10 +360,29 @@ ipcMain.handle('apply-update', async (_, tempPath: string) => {
 
       if (!extracted) {
         const escapedZip = tempPath.replace(/'/g, "''");
-        const escapedDest = updateDistDir.replace(/'/g, "''");
+        const escapedDest = stagingDir.replace(/'/g, "''");
         const psCmd = `Expand-Archive -LiteralPath '${escapedZip}' -DestinationPath '${escapedDest}' -Force`;
         execSync(`powershell -NoProfile -Command "${psCmd}"`, { stdio: 'ignore' });
       }
+
+      // Faqat imzosi to'g'ri patchni o'rnatamiz; aks holda to'liq yangilanishga o'tiladi
+      try {
+        const manifest = verifyPatchDir(stagingDir);
+        if (compareSemver(manifest.version, app.getVersion()) <= 0) throw new Error('patch is not newer');
+      } catch (verifyErr: any) {
+        console.warn('Patch rejected:', verifyErr?.message);
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+        try { fs.unlinkSync(tempPath); } catch {}
+        return {
+          success: false,
+          fallbackToFull: true,
+          error: "Kichik yangilanishni o'rnatib bo'lmadi. To'liq yangilanish yuklab olinadi.",
+        };
+      }
+
+      fs.rmSync(updateDistDir, { recursive: true, force: true });
+      fs.renameSync(stagingDir, updateDistDir);
+      try { fs.unlinkSync(path.join(updateDir, 'boot-pending')); } catch {}
 
       try { fs.unlinkSync(tempPath); } catch {}
 
