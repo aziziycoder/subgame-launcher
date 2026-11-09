@@ -5,6 +5,7 @@ import { ActivationModal } from './components/ActivationModal';
 import { GameRunnerModal } from './components/GameRunnerModal';
 import { DeviceConnectModal } from './components/DeviceConnectModal';
 import { UpdateModal } from './components/UpdateModal';
+import { LegacyLauncherNotice, isLegacyLauncher } from './components/LegacyLauncherNotice';
 import { LAUNCHER_GAMES, LauncherGame } from './data/launcherGames';
 import { fetchLauncherGames } from './services/gamesService';
 import { checkForAppUpdate, AppUpdateInfo } from './services/updateService';
@@ -1012,8 +1013,11 @@ export function App() {
         />
       )}
 
+      {/* Eski exe'ga tushgan yangi interfeys: launcherni saytdan qayta yuklash kerak */}
+      {isLegacyLauncher() && <LegacyLauncherNotice />}
+
       {/* Launcher Auto-Update Modal */}
-      {isUpdateModalOpen && updateData.latestInfo && (
+      {!isLegacyLauncher() && isUpdateModalOpen && updateData.latestInfo && (
         <UpdateModal
           currentVersion={updateData.currentVersion}
           latestInfo={updateData.latestInfo}

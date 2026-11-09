@@ -402,23 +402,21 @@ ipcMain.handle('apply-update', async (_, tempPath: string) => {
     const escapedTemp = tempPath.replace(/'/g, "''");
     const escapedDest = currentExe.replace(/'/g, "''");
 
-    const psCommand = `
-      $oldPid = ${oldPid};
-      $temp = '${escapedTemp}';
-      $dest = '${escapedDest}';
-      Wait-Process -Id $oldPid -Timeout 15 -ErrorAction SilentlyContinue;
-      Start-Sleep -Milliseconds 800;
-      for ($i = 0; $i -lt 15; $i++) {
-        try {
-          Copy-Item -LiteralPath $temp -Destination $dest -Force;
-          Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue;
-          break;
-        } catch {
-          Start-Sleep -Seconds 1;
-        }
-      }
-      Start-Process -FilePath $dest;
-    `.replace(/\\s+/g, ' ').trim();
+    // Portable exe'da foydalanuvchi ochgan fayl (dest) ilova yopilguncha o'rovchi jarayon tomonidan band
+    // turadi. Shuning uchun u bo'shashini kutamiz va nusxa xatosini haqiqatan ushlaymiz (-ErrorAction Stop;
+    // 1.4.0 da xato catch ga tushmay, yangilanish faylini o'chirib, eski exe'ni qayta ochardi).
+    // Baribir yozib bo'lmasa, yangi exe'ni TEMP dan ochamiz: rescueFromTempLaunch uni ish stoliga saqlaydi.
+    const psCommand = [
+      `$oldPid = ${oldPid};`,
+      `$temp = '${escapedTemp}';`,
+      `$dest = '${escapedDest}';`,
+      'Wait-Process -Id $oldPid -Timeout 20 -ErrorAction SilentlyContinue;',
+      '$deadline = (Get-Date).AddSeconds(30);',
+      'while (((Get-Date) -lt $deadline) -and (Get-Process | Where-Object { $_.Path -eq $dest })) { Start-Sleep -Milliseconds 500; }',
+      '$ok = $false;',
+      'for ($i = 0; ($i -lt 30) -and (-not $ok); $i++) { try { Copy-Item -LiteralPath $temp -Destination $dest -Force -ErrorAction Stop; $ok = $true; } catch { Start-Sleep -Seconds 1; } }',
+      'if ($ok) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue; Start-Process -FilePath $dest; } else { Start-Process -FilePath $temp; }',
+    ].join(' ');
 
     const child = spawn('powershell', ['-WindowStyle', 'Hidden', '-NoProfile', '-Command', psCommand], {
       detached: true,
