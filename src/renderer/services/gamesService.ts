@@ -37,6 +37,15 @@ function mapRawGameToLauncherGame(data: any, fallbackId?: string): LauncherGame 
     subtitleSize = subtitleSize || '1.6 MB';
   }
 
+  if (id === 'red-dead-redemption-2' || data.slug === 'red-dead-redemption-2') {
+    targetFileName = targetFileName || 'rdr2-translator.xml,Translation.xml,rdr2-translator.asi,dinput8.dll,ScriptHookRDR2.dll';
+    targetRelativeDir = '';
+    defaultExeName = defaultExeName || 'RDR2.exe';
+    keyPrefix = 'SUB-RDR2';
+    status = 'Tayyor';
+    subtitleSize = subtitleSize || '20.0 MB';
+  }
+
   const isStandalone = Boolean(
     data.isStandalone ||
     data.skipSubtitleInjection ||

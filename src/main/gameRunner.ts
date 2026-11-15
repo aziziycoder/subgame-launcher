@@ -497,7 +497,7 @@ export async function injectSubtitleFile(
           fs.mkdirSync(userSubDir, { recursive: true });
         }
 
-        const tempDownloadPath = path.join(userSubDir, `temp_download_${Date.now()}`);
+        const tempDownloadPath = path.join(userSubDir, `temp_download_${Date.now()}.zip`);
         onStatusUpdate?.("Subtitr serverdan yuklanmoqda...");
         await downloadSubtitleFile(config.subtitleDownloadUrl, tempDownloadPath, onStatusUpdate);
 
@@ -516,12 +516,42 @@ export async function injectSubtitleFile(
           } catch {}
 
           if (isZipFile) {
+            let extracted = false;
+            // 1. Tar orqali tezkor va xavfsiz ochish (Windows 10/11 ichki utilitasi)
             try {
-              execSync(`powershell -NoProfile -Command "Expand-Archive -LiteralPath '${tempDownloadPath.replace(/'/g, "''")}' -DestinationPath '${userSubDir.replace(/'/g, "''")}' -Force"`, { windowsHide: true });
-            } catch (unzipErr) {
-              console.warn('Zip faylni ochishda xatolik:', unzipErr);
+              execSync(`tar -xf "${tempDownloadPath}" -C "${userSubDir}"`, { stdio: 'ignore', windowsHide: true });
+              extracted = true;
+            } catch {}
+
+            // 2. PowerShell Expand-Archive zaxira usuli
+            if (!extracted) {
+              try {
+                execSync(`powershell -NoProfile -Command "Expand-Archive -LiteralPath '${tempDownloadPath.replace(/'/g, "''")}' -DestinationPath '${userSubDir.replace(/'/g, "''")}' -Force"`, { windowsHide: true });
+                extracted = true;
+              } catch (unzipErr) {
+                console.warn('Zip faylni ochishda xatolik:', unzipErr);
+              }
             }
             try { fs.unlinkSync(tempDownloadPath); } catch {}
+
+            // Agar zip ichida alohida papka bo'lsa, fayllarni userSubDir ildiziga ko'chiramiz (flatten)
+            try {
+              const subEntries = fs.readdirSync(userSubDir, { withFileTypes: true });
+              for (const subEntry of subEntries) {
+                if (subEntry.isDirectory()) {
+                  const nestedDir = path.join(userSubDir, subEntry.name);
+                  const nestedFiles = fs.readdirSync(nestedDir);
+                  for (const nf of nestedFiles) {
+                    const srcP = path.join(nestedDir, nf);
+                    const dstP = path.join(userSubDir, nf);
+                    if (!fs.existsSync(dstP)) {
+                      try { fs.renameSync(srcP, dstP); } catch {}
+                    }
+                  }
+                  try { fs.rmSync(nestedDir, { recursive: true, force: true }); } catch {}
+                }
+              }
+            } catch {}
           } else {
             // To'g'ridan-to'g'ri (zipsiz) subtitr fayli (masalan, .sds)
             const primaryName = fileNames[0] || 'stringtable_en.sds';
@@ -666,6 +696,24 @@ export async function injectSubtitleFile(
       }
 
       injectedList.push({ destFilePath, backupFilePath });
+    }
+
+    // Agar o'yin papkasida qo'shimcha papkalar kerak bo'lsa (masalan RDR2 fontmap uchun commonx)
+    for (const injected of injectedList) {
+      if (injected.destFilePath) {
+        const parentGameDir = path.dirname(injected.destFilePath);
+        const subGamePublicDir = path.join(app.getAppPath(), 'public', 'subtitles', config.gameId);
+        const commonxSrc = path.join(subGamePublicDir, 'commonx');
+        const commonxDst = path.join(parentGameDir, 'commonx');
+        if (fs.existsSync(commonxSrc) && !fs.existsSync(commonxDst)) {
+          try {
+            fs.cpSync(commonxSrc, commonxDst, { recursive: true });
+          } catch (cpxErr) {
+            console.warn('commonx papkasini nusxalashda ogohlantirish:', cpxErr);
+          }
+        }
+        break;
+      }
     }
 
     return {
