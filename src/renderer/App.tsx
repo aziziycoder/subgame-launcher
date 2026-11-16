@@ -133,9 +133,8 @@ export function App() {
       const res = await checkForAppUpdate();
       setUpdateData(res);
       if (res.updateAvailable) {
-        if (res.isForceUpdate || manual) {
-          setIsUpdateModalOpen(true);
-        }
+        // Ixtiyoriy yangilanishda ham bir marta ko'rsatamiz ("Keyinroq" bilan yopsa bo'ladi)
+        setIsUpdateModalOpen(true);
       } else {
         if (manual) {
           setUpdateToast(`Sizda SubGame Launcherning eng so'nggi talqini o'rnatilgan (v${res.currentVersion})`);
@@ -183,7 +182,7 @@ export function App() {
 
   const handlePlayGame = async (game: LauncherGame) => {
     // 0. Force Update Check: If launcher is outdated, block playing
-    if (updateData.isForceUpdate || updateData.updateAvailable) {
+    if (updateData.isForceUpdate) {
       setIsUpdateModalOpen(true);
       return;
     }

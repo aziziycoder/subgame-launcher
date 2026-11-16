@@ -1,6 +1,6 @@
 {
   "name": "subgame-launcher",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "private": true,
   "description": "SubGame Official Desktop Launcher & DRM Security System",
   "main": "dist-electron/main/bootstrap.js",
@@ -33,6 +33,9 @@
           "**/*",
           "!rusty-lake-paradise/**/*",
           "!stray/**/*",
+          "!red-dead-redemption-2/*.xml",
+          "!red-dead-redemption-2/*.asi",
+          "!red-dead-redemption-2/*.dll",
           "!**/*.swf"
         ]
       }

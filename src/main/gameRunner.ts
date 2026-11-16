@@ -34,6 +34,9 @@ interface RunningGameSession {
 
 const activeSessions = new Map<string, RunningGameSession>();
 
+/** O'yin papkasiga butunligicha ko'chiriladigan qo'shimcha papka (RDR2: commonx/data/ui/fontmap.xml) */
+const EXTRA_GAME_DIR = 'commonx';
+
 /**
  * Foydalanuvchiga ko'rsatiladigan xato matnidan fayl yo'llari va nomlarini olib tashlaydi
  * (qaysi fayl yuklanayotgani/qo'yilayotgani launcherda ko'rinmasligi kerak).
@@ -485,6 +488,9 @@ export async function injectSubtitleFile(
             if (fs.existsSync(oldEnc)) fs.unlinkSync(oldEnc);
           } catch {}
         }
+        try {
+          fs.rmSync(path.join(userSubDir, EXTRA_GAME_DIR), { recursive: true, force: true });
+        } catch {}
       }
     }
 
@@ -538,12 +544,16 @@ export async function injectSubtitleFile(
             try {
               const subEntries = fs.readdirSync(userSubDir, { withFileTypes: true });
               for (const subEntry of subEntries) {
-                if (subEntry.isDirectory()) {
+                // commonx — o'yin papkasiga butunligicha ko'chiriladigan papka (RDR2 fontmap), uni yoymaymiz
+                if (subEntry.isDirectory() && subEntry.name.toLowerCase() !== EXTRA_GAME_DIR) {
                   const nestedDir = path.join(userSubDir, subEntry.name);
                   const nestedFiles = fs.readdirSync(nestedDir);
                   for (const nf of nestedFiles) {
                     const srcP = path.join(nestedDir, nf);
                     const dstP = path.join(userSubDir, nf);
+                    if (nf.toLowerCase() === EXTRA_GAME_DIR && fs.existsSync(dstP)) {
+                      try { fs.rmSync(dstP, { recursive: true, force: true }); } catch {}
+                    }
                     if (!fs.existsSync(dstP)) {
                       try { fs.renameSync(srcP, dstP); } catch {}
                     }
@@ -588,8 +598,12 @@ export async function injectSubtitleFile(
       let source = findSubtitleSource(config.gameId, targetFileName);
 
       // Agar aynan shu nomdagi manba topilmasa, lekin boshqa fayl yuklangan bo'lsa (masalan, EN -> RU nusxalash)
+      // Faqat bir xil kengaytmali fayl (stringtable_en.sds -> _ru.sds). Aks holda RDR2'da XML
+      // dinput8.dll nomi bilan yozilib, o'yinni buzib qo'yardi.
       if (!source) {
+        const wantExt = path.extname(targetFileName).toLowerCase();
         for (const otherF of fileNames) {
+          if (otherF === targetFileName || path.extname(otherF).toLowerCase() !== wantExt) continue;
           const altSource = findSubtitleSource(config.gameId, otherF);
           if (altSource) {
             source = altSource;
@@ -699,20 +713,24 @@ export async function injectSubtitleFile(
     }
 
     // Agar o'yin papkasida qo'shimcha papkalar kerak bo'lsa (masalan RDR2 fontmap uchun commonx)
-    for (const injected of injectedList) {
-      if (injected.destFilePath) {
-        const parentGameDir = path.dirname(injected.destFilePath);
-        const subGamePublicDir = path.join(app.getAppPath(), 'public', 'subtitles', config.gameId);
-        const commonxSrc = path.join(subGamePublicDir, 'commonx');
-        const commonxDst = path.join(parentGameDir, 'commonx');
-        if (fs.existsSync(commonxSrc) && !fs.existsSync(commonxDst)) {
-          try {
-            fs.cpSync(commonxSrc, commonxDst, { recursive: true });
-          } catch (cpxErr) {
-            console.warn('commonx papkasini nusxalashda ogohlantirish:', cpxErr);
-          }
+    // Yuklangan paket (userData) birinchi, keyin exe ichidagi zaxira. Faqat biz tarqatadigan
+    // fayllar yangilanadi; o'yinchining commonx ichidagi boshqa modlariga tegilmaydi.
+    if (injectedList.length > 0) {
+      const parentGameDir = path.dirname(injectedList[0].destFilePath);
+      const commonxCandidates = [
+        path.join(userSubDir, EXTRA_GAME_DIR),
+        ...(process.resourcesPath ? [path.join(process.resourcesPath, 'subtitles', config.gameId, EXTRA_GAME_DIR)] : []),
+        path.join(app.getAppPath(), 'public', 'subtitles', config.gameId, EXTRA_GAME_DIR),
+      ];
+      const commonxSrc = commonxCandidates.find((p) => {
+        try { return fs.statSync(p).isDirectory(); } catch { return false; }
+      });
+      if (commonxSrc) {
+        try {
+          fs.cpSync(commonxSrc, path.join(parentGameDir, EXTRA_GAME_DIR), { recursive: true, force: true });
+        } catch (cpxErr) {
+          console.warn('commonx papkasini nusxalashda ogohlantirish:', cpxErr);
         }
-        break;
       }
     }
 
