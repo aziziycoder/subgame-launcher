@@ -37,6 +37,45 @@ const activeSessions = new Map<string, RunningGameSession>();
 /** O'yin papkasiga butunligicha ko'chiriladigan qo'shimcha papka (RDR2: commonx/data/ui/fontmap.xml) */
 const EXTRA_GAME_DIR = 'commonx';
 
+/** O'yin jarayoni shu vaqt ichida paydo bo'lmasa, ulangan fayllar qaytarib olinadi */
+const DEFAULT_STARTUP_GRACE_SEC = 30;
+
+interface LaunchPlan {
+  /** Ishga tushiriladigan exe (o'yinning o'zi yoki uning launcheri) */
+  exePath: string;
+  /** Kuzatiladigan o'yin jarayoni nomining boshi */
+  processPattern: string;
+  startupGraceSec: number;
+}
+
+/**
+ * Ba'zi o'yinlarni o'z exe'si orqali to'g'ridan-to'g'ri ochib bo'lmaydi. RDR2.exe to'g'ridan-to'g'ri
+ * ishga tushirilsa "ERR_NO_LAUNCHER" beradi: uni Rockstar launcheri (PlayRDR2.exe) yoki o'yin
+ * papkasidagi Launcher.exe ochishi kerak, u esa o'zi RDR2.exe ni ancha kechikib ishga tushiradi.
+ * Shuning uchun launcherni ochamiz, lekin kuzatishni RDR2 jarayoni bo'yicha olib boramiz.
+ */
+function resolveLaunchPlan(config: GameLaunchConfig, gameDir: string): LaunchPlan {
+  const rawExeName = path.basename(config.gameExePath, path.extname(config.gameExePath));
+  let processPattern = rawExeName.replace(/[-_](Win64|Win32|Shipping|x64|x86)+.*$/i, '');
+  if (processPattern.length < 3) {
+    processPattern = rawExeName;
+  }
+
+  if (config.gameId === 'red-dead-redemption-2') {
+    const starters = ['Launcher.exe', 'PlayRDR2.exe'];
+    const starter = /^rdr2$/i.test(rawExeName)
+      ? starters.map((s) => path.join(gameDir, s)).find((p) => fs.existsSync(p))
+      : undefined;
+    return {
+      exePath: starter || config.gameExePath,
+      processPattern: 'RDR2',
+      startupGraceSec: 300,
+    };
+  }
+
+  return { exePath: config.gameExePath, processPattern, startupGraceSec: DEFAULT_STARTUP_GRACE_SEC };
+}
+
 /**
  * Foydalanuvchiga ko'rsatiladigan xato matnidan fayl yo'llari va nomlarini olib tashlaydi
  * (qaysi fayl yuklanayotgani/qo'yilayotgani launcherda ko'rinmasligi kerak).
@@ -75,7 +114,8 @@ export function isProcessRunning(pattern: string): boolean {
 export function spawnDetachedCleanupWatcher(
   pattern: string,
   filesOrDest: string | InjectedFileInfo[],
-  legacyBackupPath?: string
+  legacyBackupPath?: string,
+  startupGraceSec: number = DEFAULT_STARTUP_GRACE_SEC
 ): void {
   try {
     const fileEntries: Array<{ dest: string; bak: string; kind: string }> = Array.isArray(filesOrDest)
@@ -93,7 +133,7 @@ export function spawnDetachedCleanupWatcher(
       $pattern = '${escapedPattern}';
       $files = @(${fileArrayScript});
       $t = 0;
-      while (!(Get-Process -Name $pattern* -ErrorAction SilentlyContinue) -and $t -lt 30) {
+      while (!(Get-Process -Name $pattern* -ErrorAction SilentlyContinue) -and $t -lt ${Math.max(1, Math.round(startupGraceSec))}) {
         Start-Sleep -Seconds 1;
         $t++;
       };
@@ -855,23 +895,20 @@ export async function launchGameWithProtection(
 
     onStatusUpdate("O'yin ishga tushirilmoqda...");
 
-    // Extract process pattern (e.g. Stray from Stray.exe or Stray-Win64-Shipping.exe)
-    const rawExeName = path.basename(config.gameExePath, path.extname(config.gameExePath));
-    let processPattern = rawExeName.replace(/[-_](Win64|Win32|Shipping|x64|x86)+.*$/i, '');
-    if (processPattern.length < 3) {
-      processPattern = rawExeName;
-    }
+    // Ishga tushiriladigan exe va kuzatiladigan jarayon (Stray.exe -> Stray; RDR2 -> Launcher.exe, kuzatish RDR2)
+    const plan = resolveLaunchPlan(config, gameDir);
+    const processPattern = plan.processPattern;
 
     // 4. Launch Game process
     let gameProcess: ChildProcess | null = null;
     try {
-      gameProcess = await spawnGameProcess(config.gameExePath, gameDir);
+      gameProcess = await spawnGameProcess(plan.exePath, gameDir);
     } catch (spawnErr: any) {
       let started = false;
       if (needsElevation(spawnErr)) {
         onStatusUpdate("O'yin administrator ruxsatini so'rayapti...");
         try {
-          await startGameElevated(config.gameExePath, gameDir);
+          await startGameElevated(plan.exePath, gameDir);
           started = true;
         } catch {}
       }
@@ -895,7 +932,7 @@ export async function launchGameWithProtection(
 
     // Windows mustaqil tozalovchi jarayonini ishga tushiramiz (Launcher yopilsa ham fonda ishlaydi)
     if (shouldInject && injectedList.length > 0) {
-      spawnDetachedCleanupWatcher(processPattern, injectedList);
+      spawnDetachedCleanupWatcher(processPattern, injectedList, undefined, plan.startupGraceSec);
     }
 
     onStatusUpdate("O'yin faol va o'zbekcha subtitrlar ulandi. Maroqli hordiq!");
@@ -912,8 +949,8 @@ export async function launchGameWithProtection(
         gameHasStarted = true;
       }
 
-      // O'yin ishga tushib keyin yopilsa, yoki 30 soniya ichida umuman boshlanmasa
-      if ((gameHasStarted && !isRunning) || (!gameHasStarted && checkCount > 15)) {
+      // O'yin ishga tushib keyin yopilsa, yoki kutish vaqti ichida umuman boshlanmasa (2 soniyalik qadam)
+      if ((gameHasStarted && !isRunning) || (!gameHasStarted && checkCount > plan.startupGraceSec / 2)) {
         clearInterval(monitorInterval);
         activeSessions.delete(config.gameId);
         onStatusUpdate("O'yin yakunlandi. Subtitrlar himoyalanmoqda...");
