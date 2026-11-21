@@ -32,10 +32,10 @@ interface RunningGameSession {
   gameId: string;
 }
 
-const activeSessions = new Map<string, RunningGameSession>();
+export const activeSessions = new Map<string, RunningGameSession>();
 
 /** O'yin papkasiga butunligicha ko'chiriladigan qo'shimcha papka (RDR2: commonx/data/ui/fontmap.xml) */
-const EXTRA_GAME_DIR = 'commonx';
+export const EXTRA_GAME_DIR = 'commonx';
 
 /** O'yin jarayoni shu vaqt ichida paydo bo'lmasa, ulangan fayllar qaytarib olinadi */
 const DEFAULT_STARTUP_GRACE_SEC = 30;
@@ -54,7 +54,7 @@ interface LaunchPlan {
  * papkasidagi Launcher.exe ochishi kerak, u esa o'zi RDR2.exe ni ancha kechikib ishga tushiradi.
  * Shuning uchun launcherni ochamiz, lekin kuzatishni RDR2 jarayoni bo'yicha olib boramiz.
  */
-function resolveLaunchPlan(config: GameLaunchConfig, gameDir: string): LaunchPlan {
+export function resolveLaunchPlan(config: GameLaunchConfig, gameDir: string): LaunchPlan {
   const rawExeName = path.basename(config.gameExePath, path.extname(config.gameExePath));
   let processPattern = rawExeName.replace(/[-_](Win64|Win32|Shipping|x64|x86)+.*$/i, '');
   if (processPattern.length < 3) {
@@ -80,7 +80,7 @@ function resolveLaunchPlan(config: GameLaunchConfig, gameDir: string): LaunchPla
  * Foydalanuvchiga ko'rsatiladigan xato matnidan fayl yo'llari va nomlarini olib tashlaydi
  * (qaysi fayl yuklanayotgani/qo'yilayotgani launcherda ko'rinmasligi kerak).
  */
-function hideFileDetails(err: any): string {
+export function hideFileDetails(err: any): string {
   const msg = String(err?.message || err || '');
   return msg
     .replace(/[A-Za-z]:[\\/][^\s'"`,;)]+/g, '')
@@ -436,6 +436,28 @@ export async function downloadSubtitleFile(
 }
 
 /**
+ * O'yin papkasiga qo'yiladigan subtitr fayllari nomlari (masalan "stringtable_en.sds,stringtable_ru.sds").
+ */
+export function resolveSubtitleFileNames(config: GameLaunchConfig, destDir: string): string[] {
+  const fileNames = (config.targetSubtitleFileName || '')
+    .split(/[,;|]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Mafia: Definitive Edition uchun agar faqat stringtable_en.sds ko'rsatilgan bo'lsa ham,
+  // o'yin papkasida stringtable_ru.sds bo'lsa, ikkala til foydalanuvchilariga ham ishlashi uchun uni ham qo'shamiz
+  if (
+    config.gameId === 'mafia-definitive-edition' ||
+    config.gameExePath.toLowerCase().includes('mafiadefinitiveedition')
+  ) {
+    if (!fileNames.includes('stringtable_ru.sds') && fs.existsSync(path.join(destDir, 'stringtable_ru.sds'))) {
+      fileNames.push('stringtable_ru.sds');
+    }
+  }
+  return fileNames;
+}
+
+/**
  * Subtitr faylini o'yin papkasiga xavfsiz dekodlab joylash
  * Bir yoki bir nechta subtitr fayllarini qo'llab-quvvatlaydi (masalan, stringtable_en.sds,stringtable_ru.sds)
  */
@@ -478,21 +500,7 @@ export async function injectSubtitleFile(
       }
     } catch {}
 
-    const fileNames = config.targetSubtitleFileName
-      .split(/[,;|]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    // Mafia: Definitive Edition uchun agar faqat stringtable_en.sds ko'rsatilgan bo'lsa ham,
-    // o'yin papkasida stringtable_ru.sds bo'lsa, ikkala til foydalanuvchilariga ham ishlashi uchun uni ham qo'shamiz
-    if (
-      config.gameId === 'mafia-definitive-edition' ||
-      config.gameExePath.toLowerCase().includes('mafiadefinitiveedition')
-    ) {
-      if (!fileNames.includes('stringtable_ru.sds') && fs.existsSync(path.join(destDir, 'stringtable_ru.sds'))) {
-        fileNames.push('stringtable_ru.sds');
-      }
-    }
+    const fileNames = resolveSubtitleFileNames(config, destDir);
 
     const userSubDir = path.join(app.getPath('userData'), 'subtitles', config.gameId);
     const versionFilePath = path.join(userSubDir, 'version.txt');

@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Play, FolderOpen, AlertCircle, X, CheckCircle2, Loader2, Sparkles, Globe, DownloadCloud, ExternalLink, ShieldCheck } from 'lucide-react';
+import { Play, FolderOpen, AlertCircle, X, CheckCircle2, Loader2, Sparkles, Globe, DownloadCloud, ExternalLink, ShieldCheck, Trash2 } from 'lucide-react';
 import { LauncherGame } from '../data/launcherGames';
+import type { SubtitleRemovalInfo } from '../types';
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes > 0) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return '0 MB';
+}
 
 interface GameRunnerModalProps {
   game: LauncherGame;
@@ -18,6 +26,10 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
   const [error, setError] = useState<string | null>(null);
   const [installedSubtitleVersion, setInstalledSubtitleVersion] = useState<string | null>(null);
   const [checkingVersion, setCheckingVersion] = useState(true);
+  const [removalInfo, setRemovalInfo] = useState<SubtitleRemovalInfo | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const isStandalone = Boolean(
     game.isStandalone ||
@@ -97,6 +109,70 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
       unsubscribe?.();
     };
   }, []);
+
+  const buildSubtitleConfig = () => ({
+    gameId: game.id,
+    gameExePath: exePath,
+    targetSubtitleFileName: game.targetFileName,
+    targetRelativeDir: game.targetRelativeDir,
+    subtitleDownloadUrl: game.subtitleDownloadUrl,
+    subtitleVersion: game.version,
+    skipSubtitleInjection: Boolean(game.skipSubtitleInjection || !game.targetFileName),
+    isAuthorized: true,
+  });
+
+  // Eski (1.4.5 gacha) main kodda bu IPC yo'q: tugma ko'rinmaydi
+  const canRemove = !isStandalone && Boolean(window.subgame?.getSubtitleRemovalInfo && window.subgame?.removeSubtitle);
+
+  const refreshRemovalInfo = async () => {
+    if (!canRemove) return null;
+    try {
+      const info = await window.subgame!.getSubtitleRemovalInfo!(buildSubtitleConfig());
+      setRemovalInfo(info?.success ? info : null);
+      return info;
+    } catch {
+      setRemovalInfo(null);
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    void refreshRemovalInfo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.id, exePath, installedSubtitleVersion]);
+
+  const openRemoveConfirm = async () => {
+    setRemoveError(null);
+    setError(null);
+    setSuccessMessage(null);
+    await refreshRemovalInfo();
+    setConfirmRemove(true);
+  };
+
+  const handleRemoveSubtitles = async (cacheOnly = false) => {
+    if (!window.subgame?.removeSubtitle) return;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      const res = await window.subgame.removeSubtitle(buildSubtitleConfig(), { cacheOnly });
+      if (res?.success) {
+        try {
+          localStorage.removeItem(`subgame_sub_version_${game.id}`);
+        } catch {}
+        setInstalledSubtitleVersion(null);
+        setConfirmRemove(false);
+        setSuccessMessage(res.message);
+        await refreshRemovalInfo();
+      } else {
+        setRemoveError(res?.message || 'Subtitrlarni o‘chirib bo‘lmadi.');
+        await refreshRemovalInfo();
+      }
+    } catch (err: any) {
+      setRemoveError(err?.message || 'Kutilmagan xatolik yuz berdi.');
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   const handleSelectExe = async () => {
     const selected = await window.subgame?.selectGameExecutable();
@@ -348,6 +424,22 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
           )}
         </div>
 
+        {canRemove && removalInfo && !removalInfo.nothingToRemove && !launching && !installing && (
+          <div className="flex items-center justify-between gap-2 -mt-3 mb-5 px-1 text-[11px] text-gray-400">
+            <span>
+              Subtitrlar kompyuteringizda <span className="text-gray-200 font-semibold">{formatSize(removalInfo.totalBytes)}</span> joy egallagan.
+            </span>
+            <button
+              type="button"
+              onClick={openRemoveConfirm}
+              className="text-rose-300 hover:text-rose-200 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
+              title="O‘zbekcha subtitrlarni kompyuterdan o‘chirish (litsenziya saqlanadi)"
+            >
+              <Trash2 className="w-3 h-3" /> O‘chirish
+            </button>
+          </div>
+        )}
+
         {error && (
           <div className="flex items-center gap-2 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs mb-4">
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
@@ -461,6 +553,107 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
             </button>
           )}
         </div>
+
+        {confirmRemove && removalInfo && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center p-5 bg-[#0B0D12]/90 backdrop-blur-sm">
+            <div className="w-full bg-[#1A1F2A] border border-rose-500/40 rounded-2xl p-5 shadow-modal">
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center">
+                  <Trash2 className="w-4 h-4 text-rose-300" />
+                </div>
+                <h4 className="text-base font-bold text-[#F5F7FA]">O‘zbekcha subtitrlarni o‘chirish</h4>
+              </div>
+
+              <p className="text-xs text-gray-300 mb-3">
+                <span className="font-semibold text-gray-100">{game.title}</span> uchun quyidagilar o‘chiriladi:
+              </p>
+              <ul className="text-xs text-gray-300 space-y-1.5 mb-3">
+                {removalInfo.cacheBytes > 0 && (
+                  <li className="flex justify-between gap-3">
+                    <span>• Launcher yuklab olgan subtitr paketi</span>
+                    <span className="font-mono text-gray-100 shrink-0">{formatSize(removalInfo.cacheBytes)}</span>
+                  </li>
+                )}
+                {removalInfo.gameFolderFound && removalInfo.gameFolderItems > 0 && (
+                  <li className="flex justify-between gap-3">
+                    <span>• O‘yin papkasidagi launcher fayllari ({removalInfo.gameFolderItems} ta), asl fayllar tiklanadi</span>
+                    <span className="font-mono text-gray-100 shrink-0">{formatSize(removalInfo.gameFolderBytes)}</span>
+                  </li>
+                )}
+              </ul>
+              <div className="flex justify-between text-xs font-bold text-[#F5F7FA] border-t border-[#2A3245] pt-2.5 mb-3">
+                <span>Bo‘shaydigan joy</span>
+                <span className="font-mono text-[#A3E635]">{formatSize(removalInfo.totalBytes)}</span>
+              </div>
+
+              <p className="text-[11px] text-gray-400 mb-3 leading-relaxed">
+                O‘yinning o‘z fayllariga tegilmaydi. Litsenziyangiz shu kompyuterda saqlanib qoladi: keyinroq qayta o‘rnatish uchun yana to‘lash shart emas.
+              </p>
+
+              {removalInfo.gameRunning && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-amber-500/10 border border-amber-500/40 rounded-xl text-amber-200 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>O‘yin hozir ochiq. Avval o‘yinni to‘liq yoping, keyin o‘chiring.</span>
+                </div>
+              )}
+              {!removalInfo.gameRunning && removalInfo.filesLocked && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-amber-500/10 border border-amber-500/40 rounded-xl text-amber-200 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>Ba’zi subtitr fayllari band: o‘yin yoki boshqa dastur ularni ishlatmoqda. O‘yinni (va Steam/Epic launcherini) yopib, qaytadan oching.</span>
+                </div>
+              )}
+              {!removalInfo.gameFolderFound && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-amber-500/10 border border-amber-500/40 rounded-xl text-amber-200 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    O‘yin papkasi topilmadi. O‘yinni boshqa joyga ko‘chirgan bo‘lsangiz, avval yangi joydagi {game.defaultExeName} faylini tanlang. O‘yin o‘chirilgan bo‘lsa, faqat launcher yuklab olgan fayllar o‘chiriladi.
+                  </span>
+                </div>
+              )}
+              {removalInfo.gameFolderFound && removalInfo.needsVerify && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-[#141821] border border-[#2A3245] rounded-xl text-gray-300 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-300" />
+                  <span>Ba’zi fayllarning asl nusxasi saqlanmagan. O‘chirgandan keyin o‘yin ishlamasa, Steam/Epic’da o‘yin fayllarini tekshiring.</span>
+                </div>
+              )}
+
+              {removeError && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-400" />
+                  <span>{removeError}</span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setConfirmRemove(false)}
+                  disabled={removing}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-[#141821] hover:bg-white/10 text-gray-300 text-xs font-semibold border border-[#2A3245] transition-all cursor-pointer disabled:opacity-50"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveSubtitles(!removalInfo.gameFolderFound)}
+                  disabled={removing || removalInfo.gameRunning || Boolean(removalInfo.filesLocked)}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {removing ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> O‘chirilmoqda...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {removalInfo.gameFolderFound ? 'O‘chirish' : 'Faqat yuklangan fayllarni o‘chirish'}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

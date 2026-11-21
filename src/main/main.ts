@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import { getHardwareId } from './hwid';
 import { loadLicenseStore, activateLicense } from './license';
 import { launchGameWithProtection, injectSubtitleFile } from './gameRunner';
+import { getSubtitleRemovalInfo, removeSubtitles } from './subtitleRemover';
 import { compareSemver, verifyPatchDir, readBlockedPatchVersions } from './patchVerify';
 
 let mainWindow: BrowserWindow | null = null;
@@ -226,6 +227,14 @@ ipcMain.handle('install-subtitle', async (_, config) => {
     }
   });
 });
+
+// IPC: O'chirishdan oldin nima o'chishi va qancha joy bo'shashini ko'rsatish
+ipcMain.handle('get-subtitle-removal-info', (_, config) => getSubtitleRemovalInfo(config));
+
+// IPC: O'zbekcha subtitrlarni kompyuterdan olib tashlash (litsenziya saqlanadi)
+ipcMain.handle('remove-subtitle', (_, config, options?: { cacheOnly?: boolean }) =>
+  removeSubtitles(config, Boolean(options?.cacheOnly))
+);
 
 // IPC: Get Installed Subtitle Version for a Game
 ipcMain.handle('get-subtitle-version', (_, gameId: string) => {

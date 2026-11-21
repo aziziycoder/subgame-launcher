@@ -11,6 +11,28 @@ export interface GameLaunchConfigPayload {
   subtitleVersion?: string;
 }
 
+export interface SubtitleRemovalInfoPayload {
+  success: boolean;
+  message?: string;
+  cacheBytes: number;
+  gameFolderBytes: number;
+  totalBytes: number;
+  gameFolderItems: number;
+  gameFolderFound: boolean;
+  gameRunning: boolean;
+  filesLocked?: boolean;
+  nothingToRemove: boolean;
+  needsVerify: boolean;
+}
+
+export interface SubtitleRemovalResultPayload {
+  success: boolean;
+  message: string;
+  freedBytes?: number;
+  needsVerify?: boolean;
+  code?: 'running' | 'locked' | 'folder-missing' | 'error';
+}
+
 export interface SubGameApi {
   getHardwareId: () => Promise<any>;
   getLicenses: () => Promise<any>;
@@ -19,6 +41,11 @@ export interface SubGameApi {
   launchGame: (config: GameLaunchConfigPayload) => Promise<{ success: boolean; message: string }>;
   installSubtitle: (config: GameLaunchConfigPayload) => Promise<{ success: boolean; message: string; targetPath?: string }>;
   openGameFolder: (exePath: string) => Promise<boolean>;
+  getSubtitleRemovalInfo: (config: GameLaunchConfigPayload) => Promise<SubtitleRemovalInfoPayload>;
+  removeSubtitle: (
+    config: GameLaunchConfigPayload,
+    options?: { cacheOnly?: boolean }
+  ) => Promise<SubtitleRemovalResultPayload>;
   getSubtitleVersion: (gameId: string) => Promise<string | null>;
   onStatusUpdate: (callback: (status: any) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
@@ -38,6 +65,8 @@ const api: SubGameApi = {
   launchGame: (config) => ipcRenderer.invoke('launch-game', config),
   installSubtitle: (config) => ipcRenderer.invoke('install-subtitle', config),
   openGameFolder: (exePath) => ipcRenderer.invoke('open-game-folder', exePath),
+  getSubtitleRemovalInfo: (config) => ipcRenderer.invoke('get-subtitle-removal-info', config),
+  removeSubtitle: (config, options) => ipcRenderer.invoke('remove-subtitle', config, options),
   getSubtitleVersion: (gameId: string) => ipcRenderer.invoke('get-subtitle-version', gameId),
   onStatusUpdate: (callback) => {
     const handler = (_: any, status: string) => callback(status);
