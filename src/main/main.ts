@@ -6,7 +6,7 @@ import http from 'http';
 import { spawn } from 'child_process';
 import { getHardwareId } from './hwid';
 import { loadLicenseStore, activateLicense } from './license';
-import { launchGameWithProtection, injectSubtitleFile } from './gameRunner';
+import { launchGameWithProtection, injectSubtitleFile, getSubtitleCacheDir, evaluateVariantRules } from './gameRunner';
 import { getSubtitleRemovalInfo, removeSubtitles } from './subtitleRemover';
 import { compareSemver, verifyPatchDir, readBlockedPatchVersions } from './patchVerify';
 
@@ -236,16 +236,21 @@ ipcMain.handle('remove-subtitle', (_, config, options?: { cacheOnly?: boolean })
   removeSubtitles(config, Boolean(options?.cacheOnly))
 );
 
-// IPC: Get Installed Subtitle Version for a Game
-ipcMain.handle('get-subtitle-version', (_, gameId: string) => {
+// IPC: Get Installed Subtitle Version for a Game (and optional variant)
+ipcMain.handle('get-subtitle-version', (_, gameId: string, variantKey?: string) => {
   try {
     if (!gameId) return null;
-    const versionFile = path.join(app.getPath('userData'), 'subtitles', gameId, 'version.txt');
+    const versionFile = path.join(getSubtitleCacheDir(gameId, variantKey), 'version.txt');
     if (fs.existsSync(versionFile)) {
       return fs.readFileSync(versionFile, 'utf8').trim();
     }
   } catch {}
   return null;
+});
+
+// IPC: Detect matching game variant from game folder
+ipcMain.handle('detect-game-variants', (_, exePath: string, targetRelativeDir: string | undefined, variants: any[]) => {
+  return evaluateVariantRules(exePath, targetRelativeDir, variants);
 });
 
 // IPC: Check if local dubbing files are present in the game folder

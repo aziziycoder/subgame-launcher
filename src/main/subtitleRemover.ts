@@ -7,7 +7,9 @@ import {
   GameLaunchConfig,
   EXTRA_GAME_DIR,
   activeSessions,
+  clearLastInjectedManifest,
   findSubtitleSource,
+  getSubtitleCacheDir,
   hideFileDetails,
   isProcessRunning,
   resolveLaunchPlan,
@@ -70,8 +72,8 @@ export interface SubtitleRemovalResult {
   code?: 'running' | 'locked' | 'folder-missing' | 'error';
 }
 
-function userCacheDir(gameId: string): string {
-  return path.join(app.getPath('userData'), 'subtitles', gameId);
+function userCacheDir(gameId: string, variantKey?: string): string {
+  return getSubtitleCacheDir(gameId, variantKey);
 }
 
 function isSafeGameId(gameId: string): boolean {
@@ -126,13 +128,13 @@ function findTargetDir(gameDir: string, targetRelativeDir?: string): string {
 }
 
 /** Paketimizdagi faylning o'yinga yoziladigan (dekodlangan) mazmuni; paket yo'q bo'lsa null */
-function readOurPayload(gameId: string, fileName: string, fileNames: string[]): Buffer | null {
-  let source = findSubtitleSource(gameId, fileName);
+function readOurPayload(gameId: string, fileName: string, fileNames: string[], variantKey?: string): Buffer | null {
+  let source = findSubtitleSource(gameId, fileName, variantKey);
   if (!source) {
     const wantExt = path.extname(fileName).toLowerCase();
     for (const other of fileNames) {
       if (other === fileName || path.extname(other).toLowerCase() !== wantExt) continue;
-      source = findSubtitleSource(gameId, other);
+      source = findSubtitleSource(gameId, other, variantKey);
       if (source) break;
     }
   }
@@ -218,7 +220,7 @@ function planGameFolder(config: GameLaunchConfig, gameDir: string): PlannedActio
     if (path.resolve(dest).toLowerCase() === path.resolve(config.gameExePath).toLowerCase()) continue;
     const bak = path.join(destDir, `${name}.subgame_bak`);
     const rangeBak = `${dest}.subgame_rangebak`;
-    const payload = readOurPayload(config.gameId, name, fileNames);
+    const payload = readOurPayload(config.gameId, name, fileNames, config.variantKey);
 
     if (fs.existsSync(rangeBak)) {
       actions.push({ kind: 'restore-range', target: dest, backup: rangeBak, bytes: fileSize(rangeBak) });
@@ -251,7 +253,7 @@ function planGameFolder(config: GameLaunchConfig, gameDir: string): PlannedActio
 
   // commonx (RDR2 fontmap): faqat biz tarqatgan va mazmuni o'zgarmagan fayllar
   const cacheExtra = [
-    path.join(userCacheDir(config.gameId), EXTRA_GAME_DIR),
+    path.join(userCacheDir(config.gameId, config.variantKey), EXTRA_GAME_DIR),
     ...(process.resourcesPath ? [path.join(process.resourcesPath, 'subtitles', config.gameId, EXTRA_GAME_DIR)] : []),
     path.join(app.getAppPath(), 'public', 'subtitles', config.gameId, EXTRA_GAME_DIR),
   ].find((p) => {
@@ -304,7 +306,7 @@ export function getSubtitleRemovalInfo(config: GameLaunchConfig): SubtitleRemova
   };
   try {
     if (!config || !isSafeGameId(config.gameId)) return { ...empty, message: "O'yin aniqlanmadi." };
-    const cacheBytes = dirSize(userCacheDir(config.gameId));
+    const cacheBytes = dirSize(userCacheDir(config.gameId, config.variantKey));
     const { gameDir, found } = folderState(config);
     let actions: PlannedAction[] = [];
     let filesLocked = false;
@@ -317,7 +319,7 @@ export function getSubtitleRemovalInfo(config: GameLaunchConfig): SubtitleRemova
       }
     }
     const gameFolderBytes = actions.reduce((s, a) => s + a.bytes, 0);
-    const cacheExists = fs.existsSync(userCacheDir(config.gameId));
+    const cacheExists = fs.existsSync(userCacheDir(config.gameId, config.variantKey));
     return {
       success: true,
       cacheBytes,
@@ -448,7 +450,7 @@ export async function removeSubtitles(config: GameLaunchConfig, cacheOnly = fals
 
     // Launcher yuklab olgan paket (o'yin papkasi tozalangandan keyin, aks holda qayta urinishda
     // qaysi fayl bizniki ekanini aniqlay olmay qolamiz)
-    const cacheDir = userCacheDir(config.gameId);
+    const cacheDir = userCacheDir(config.gameId, config.variantKey);
     if (fs.existsSync(cacheDir)) {
       const bytes = dirSize(cacheDir);
       try {
@@ -465,6 +467,7 @@ export async function removeSubtitles(config: GameLaunchConfig, cacheOnly = fals
       }
       freed += bytes;
     }
+    clearLastInjectedManifest(config.gameId);
 
     const mb = (freed / (1024 * 1024)).toFixed(1);
     let message = found && !cacheOnly

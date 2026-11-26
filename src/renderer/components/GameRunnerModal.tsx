@@ -33,21 +33,49 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
   const [launchMode, setLaunchMode] = useState<'subtitle' | 'dubbing'>(game.hasDubbing ? 'dubbing' : 'subtitle');
   const [localDubInfo, setLocalDubInfo] = useState<{ installed: boolean; totalBytes: number } | null>(null);
 
+  const hasVariants = Array.isArray(game.variants) && game.variants.length >= 2;
+  const [selectedVariantKey, setSelectedVariantKey] = useState<string>(() => {
+    if (!hasVariants) return '';
+    const savedVar = localStorage.getItem(`subgame_variant_${game.id}`);
+    if (savedVar && game.variants!.some((v) => v.key === savedVar)) return savedVar;
+    return game.variants![0].key;
+  });
+  const [variantDetection, setVariantDetection] = useState<{
+    detectedKey: string | null;
+    results: Record<string, { matched: boolean; reasons: string[] }>;
+  } | null>(null);
+
+  const activeVariant = hasVariants
+    ? game.variants!.find((v) => v.key === selectedVariantKey) || game.variants![0]
+    : null;
+  const variantKey = activeVariant?.key;
+  const effectiveTargetFileName = activeVariant ? activeVariant.targetFileName : game.targetFileName;
+  const effectiveTargetRelativeDir = activeVariant
+    ? (activeVariant.targetRelativeDir ?? game.targetRelativeDir)
+    : game.targetRelativeDir;
+  const effectiveDownloadUrl = activeVariant ? activeVariant.subtitleDownloadUrl : game.subtitleDownloadUrl;
+  const effectiveSize = activeVariant?.subtitleSize || game.subtitleSize;
+  const effectiveExeName = activeVariant?.defaultExeName || game.defaultExeName;
+
   const isStandalone = Boolean(
     game.isStandalone ||
     game.skipSubtitleInjection ||
     game.id === 'level-devil' ||
     game.slug === 'level-devil' ||
-    !game.targetFileName
+    !effectiveTargetFileName
   );
 
-  const targetVersion = (game.version || '').trim();
-  const hasSubtitleUrl = Boolean(game.subtitleDownloadUrl && game.subtitleDownloadUrl.startsWith('http'));
+  const targetVersion = (activeVariant ? activeVariant.subtitleVersion : game.version || '').trim();
+  const hasSubtitleUrl = Boolean(effectiveDownloadUrl && effectiveDownloadUrl.startsWith('http'));
 
   // If game requires subtitles: verify whether current installed version equals the latest version
   const isSubtitleOutdated = !isStandalone && hasSubtitleUrl && Boolean(
     targetVersion && (!installedSubtitleVersion || installedSubtitleVersion !== targetVersion)
   );
+
+  const versionStorageKey = variantKey
+    ? `subgame_sub_version_${game.id}_${variantKey}`
+    : `subgame_sub_version_${game.id}`;
 
   useEffect(() => {
     // Load previously saved path if exists
@@ -62,11 +90,11 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
       let ver: string | null = null;
       try {
         if (window.subgame?.getSubtitleVersion) {
-          ver = await window.subgame.getSubtitleVersion(game.id);
+          ver = await window.subgame.getSubtitleVersion(game.id, variantKey);
         }
       } catch {}
       if (!ver) {
-        ver = localStorage.getItem(`subgame_sub_version_${game.id}`);
+        ver = localStorage.getItem(versionStorageKey);
       }
       if (isMounted) {
         setInstalledSubtitleVersion(ver || null);
@@ -75,7 +103,29 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     }
     checkInstalledVersion();
     return () => { isMounted = false; };
-  }, [game.id]);
+  }, [game.id, variantKey, versionStorageKey]);
+
+  useEffect(() => {
+    if (!hasVariants || !exePath || !window.subgame?.detectGameVariants) {
+      setVariantDetection(null);
+      return;
+    }
+    let isMounted = true;
+    window.subgame
+      .detectGameVariants(exePath, game.targetRelativeDir, game.variants!)
+      .then((res) => {
+        if (!isMounted) return;
+        setVariantDetection(res);
+        const hasSavedChoice = Boolean(localStorage.getItem(`subgame_variant_${game.id}`));
+        if (!hasSavedChoice && res?.detectedKey) {
+          setSelectedVariantKey(res.detectedKey);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setVariantDetection(null);
+      });
+    return () => { isMounted = false; };
+  }, [game.id, game.targetRelativeDir, game.variants, exePath, hasVariants]);
 
   useEffect(() => {
     // Subscribe to IPC status updates (supports both text string and 0-100% progress object)
@@ -115,11 +165,12 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
   const buildSubtitleConfig = () => ({
     gameId: game.id,
     gameExePath: exePath,
-    targetSubtitleFileName: game.targetFileName,
-    targetRelativeDir: game.targetRelativeDir,
-    subtitleDownloadUrl: game.subtitleDownloadUrl,
-    subtitleVersion: game.version,
-    skipSubtitleInjection: Boolean(game.skipSubtitleInjection || !game.targetFileName),
+    targetSubtitleFileName: effectiveTargetFileName,
+    targetRelativeDir: effectiveTargetRelativeDir,
+    subtitleDownloadUrl: effectiveDownloadUrl,
+    subtitleVersion: targetVersion,
+    variantKey,
+    skipSubtitleInjection: Boolean(game.skipSubtitleInjection || !effectiveTargetFileName),
     isAuthorized: true,
     useDubbing: Boolean(game.hasDubbing && launchMode === 'dubbing'),
     dubbingDownloadUrl: game.dubbingDownloadUrl,
@@ -149,7 +200,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
       setLocalDubInfo(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game.id, exePath, installedSubtitleVersion]);
+  }, [game.id, exePath, installedSubtitleVersion, variantKey]);
 
   const openRemoveConfirm = async () => {
     setRemoveError(null);
@@ -167,7 +218,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
       const res = await window.subgame.removeSubtitle(buildSubtitleConfig(), { cacheOnly });
       if (res?.success) {
         try {
-          localStorage.removeItem(`subgame_sub_version_${game.id}`);
+          localStorage.removeItem(versionStorageKey);
         } catch {}
         setInstalledSubtitleVersion(null);
         setConfirmRemove(false);
@@ -205,9 +256,33 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     }
   };
 
+  const activeDetection = activeVariant && variantDetection?.results?.[activeVariant.key];
+  const isVariantMismatch = Boolean(hasVariants && exePath && activeDetection && !activeDetection.matched);
+  const suggestedVariant =
+    isVariantMismatch && variantDetection?.detectedKey
+      ? game.variants!.find((v) => v.key === variantDetection.detectedKey) || null
+      : null;
+
+  const handleSelectVariant = (key: string) => {
+    setSelectedVariantKey(key);
+    try {
+      localStorage.setItem(`subgame_variant_${game.id}`, key);
+    } catch {}
+    setError(null);
+    setSuccessMessage(null);
+  };
+
   const handleInstallSubtitle = async () => {
     if (!exePath) {
-      setError(`Iltimos, avval o'yin ijro faylini (${game.defaultExeName}) tanlang.`);
+      setError(`Iltimos, avval o'yin ijro faylini (${effectiveExeName}) tanlang.`);
+      return;
+    }
+    if (isVariantMismatch && activeVariant) {
+      setError(
+        suggestedVariant
+          ? `Tanlangan "${activeVariant.label}" versiyasi o‘yin papkasiga mos kelmadi. Iltimos, "${suggestedVariant.label}" versiyasini tanlang.`
+          : `Tanlangan "${activeVariant.label}" versiyasi o‘yin papkasidagi fayllarga mos kelmadi.`
+      );
       return;
     }
 
@@ -224,7 +299,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
       if (res?.success) {
         setInstalledSubtitleVersion(targetVersion);
         try {
-          localStorage.setItem(`subgame_sub_version_${game.id}`, targetVersion);
+          localStorage.setItem(versionStorageKey, targetVersion);
         } catch {}
         setSuccessMessage(res.message || `O‘zbekcha subtitr (${targetVersion}) muvaffaqiyatli ulandi! Endi o‘yinni boshlashingiz mumkin.`);
         setStatusMessage('');
@@ -249,7 +324,16 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
 
   const handleLaunch = async () => {
     if (!exePath) {
-      setError(`Iltimos, avval o'yin ijro faylini (${game.defaultExeName}) tanlang.`);
+      setError(`Iltimos, avval o'yin ijro faylini (${effectiveExeName}) tanlang.`);
+      return;
+    }
+
+    if (isVariantMismatch && activeVariant) {
+      setError(
+        suggestedVariant
+          ? `Tanlangan "${activeVariant.label}" versiyasi o‘yin papkasiga mos kelmadi. Iltimos, "${suggestedVariant.label}" versiyasini tanlang.`
+          : `Tanlangan "${activeVariant.label}" versiyasi o‘yin papkasidagi fayllarga mos kelmadi.`
+      );
       return;
     }
 
@@ -365,7 +449,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
                 setError(null);
                 setSuccessMessage(null);
               }}
-              placeholder={`Masalan: C:\\Games\\${game.title}\\${game.defaultExeName}`}
+              placeholder={`Masalan: C:\\Games\\${game.title}\\${effectiveExeName}`}
               className="flex-1 px-3.5 py-2.5 bg-[#0B0D12] border border-[#2A3245] rounded-xl text-xs text-gray-200 focus:outline-none focus:border-[#A3E635] font-mono truncate"
             />
             <button
@@ -378,7 +462,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
           </div>
           <div className="flex items-center justify-between text-[11px] text-gray-400">
             <span>
-              O‘rnatilgan papkadagi <code className="text-[#A3E635] font-mono">{game.defaultExeName}</code> faylini ko‘rsating.
+              O‘rnatilgan papkadagi <code className="text-[#A3E635] font-mono">{effectiveExeName}</code> faylini ko‘rsating.
             </span>
             <button
               type="button"
@@ -389,6 +473,82 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
             </button>
           </div>
         </div>
+
+        {/* Game Variant Selector (Torrent / Steam / ...) */}
+        {hasVariants && (
+          <div className="mb-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                Qaysi versiyangiz bor?
+              </span>
+              {activeVariant && (
+                <span className="text-[10px] text-gray-400">
+                  Tanlangan: <span className="text-[#A3E635] font-semibold">{activeVariant.label}</span>
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {game.variants!.map((v) => {
+                const isSelected = activeVariant?.key === v.key;
+                const isDetected = variantDetection?.detectedKey === v.key;
+                return (
+                  <button
+                    key={v.key}
+                    type="button"
+                    onClick={() => handleSelectVariant(v.key)}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#A3E635]/15 border-[#A3E635]'
+                        : 'bg-[#141821] border-[#2A3245] hover:border-gray-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1 text-xs font-bold text-white">
+                      <span className="truncate">{v.label}</span>
+                      {v.subtitleSize && (
+                        <span className="font-mono text-[10px] text-gray-400 shrink-0">{v.subtitleSize}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-1 mt-0.5">
+                      <span className="text-[10px] font-mono text-gray-400">{v.subtitleVersion}</span>
+                      {isDetected && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          Aniqlangan
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {isVariantMismatch && activeVariant && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/40 rounded-xl text-xs text-rose-200 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-rose-300">
+                      Tanlangan "{activeVariant.label}" versiyasi o‘yin papkasiga mos kelmadi!
+                    </p>
+                    {activeDetection?.reasons && activeDetection.reasons.length > 0 && (
+                      <p className="text-[11px] text-rose-200/80">
+                        {activeDetection.reasons[0]}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {suggestedVariant && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectVariant(suggestedVariant.key)}
+                    className="w-full py-1.5 px-3 rounded-lg bg-[#A3E635] hover:bg-[#84CC16] text-[#0B0D12] text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    "{suggestedVariant.label}" versiyasiga o‘tish
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Dubbing & Subtitle Mode Selector */}
         {game.hasDubbing && (
@@ -452,7 +612,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
                 ? ' (Mustaqil o‘yin)'
                 : game.hasDubbing && launchMode === 'dubbing'
                   ? ` (${game.dubbingSize || '1.16 GB'})`
-                  : ` (${game.subtitleSize})`}
+                  : ` (${effectiveSize})`}
             </span>
           </div>
           {game.isStandalone || game.skipSubtitleInjection ? (

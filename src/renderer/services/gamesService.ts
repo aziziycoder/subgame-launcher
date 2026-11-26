@@ -1,4 +1,4 @@
-import type { LauncherGame } from '../data/launcherGames';
+import type { LauncherGame, LauncherSubtitleVariant } from '../data/launcherGames';
 import { fetchFromBackend } from './apiClient';
 
 /**
@@ -80,6 +80,30 @@ function mapRawGameToLauncherGame(data: any, fallbackId?: string): LauncherGame 
   const rawDubUrl = data.dubbingDownloadUrl || data.dubbing_download_url;
   const dubbingDownloadUrl = rawDubUrl && rawDubUrl.startsWith('http') ? rawDubUrl : undefined;
 
+  const rawVariants = Array.isArray(data.variants) ? data.variants : [];
+  const variants: LauncherSubtitleVariant[] = rawVariants
+    .map((v: any, idx: number) => {
+      const vUrl = v.subtitleDownloadUrl || v.subtitle_download_url;
+      return {
+        key: String(v.key || `variant-${idx + 1}`).trim(),
+        label: String(v.label || v.key || `Versiya ${idx + 1}`).trim(),
+        subtitleVersion: String(v.subtitleVersion || v.subtitle_version || data.subtitleVersion || 'v1.0.0').trim(),
+        subtitleSize: field(v.subtitleSize, v.subtitle_size) || subtitleSize,
+        subtitleDownloadUrl: vUrl && String(vUrl).startsWith('http') ? String(vUrl) : undefined,
+        targetFileName: field(v.targetFileName, v.target_file_name) || targetFileName || '',
+        targetRelativeDir: field(v.targetRelativeDir, v.target_relative_dir) ?? targetRelativeDir,
+        defaultExeName: field(v.defaultExeName, v.default_exe_name) || defaultExeName,
+        sortOrder: typeof v.sortOrder === 'number' ? v.sortOrder : (typeof v.sort_order === 'number' ? v.sort_order : idx),
+        detectFilesPresent: Array.isArray(v.detectFilesPresent || v.detect_files_present) ? (v.detectFilesPresent || v.detect_files_present) : [],
+        detectFilesAbsent: Array.isArray(v.detectFilesAbsent || v.detect_files_absent) ? (v.detectFilesAbsent || v.detect_files_absent) : [],
+        detectFileSizes: (v.detectFileSizes || v.detect_file_sizes) && typeof (v.detectFileSizes || v.detect_file_sizes) === 'object'
+          ? (v.detectFileSizes || v.detect_file_sizes)
+          : {},
+      };
+    })
+    .filter((v: LauncherSubtitleVariant) => Boolean(v.key && v.targetFileName))
+    .sort((a: LauncherSubtitleVariant, b: LauncherSubtitleVariant) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+
   return {
     id,
     slug: data.slug || id,
@@ -107,6 +131,7 @@ function mapRawGameToLauncherGame(data: any, fallbackId?: string): LauncherGame 
     dubbingPrice,
     dubbingVersion,
     dubbingDownloadUrl,
+    variants: variants.length > 0 ? variants : undefined,
   };
 }
 

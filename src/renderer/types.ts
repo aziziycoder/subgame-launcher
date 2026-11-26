@@ -45,6 +45,7 @@ export interface SubGameApi {
     isAuthorized?: boolean;
     skipSubtitleInjection?: boolean;
     subtitleVersion?: string;
+    variantKey?: string;
     useDubbing?: boolean;
     dubbingDownloadUrl?: string;
     dubbingVersion?: string;
@@ -58,6 +59,7 @@ export interface SubGameApi {
     isAuthorized?: boolean;
     skipSubtitleInjection?: boolean;
     subtitleVersion?: string;
+    variantKey?: string;
     useDubbing?: boolean;
     dubbingDownloadUrl?: string;
     dubbingVersion?: string;
@@ -66,7 +68,15 @@ export interface SubGameApi {
   /** 1.4.6+: eski main kodda yo'q bo'lishi mumkin */
   getSubtitleRemovalInfo?: (config: SubtitleConfig) => Promise<SubtitleRemovalInfo>;
   removeSubtitle?: (config: SubtitleConfig, options?: { cacheOnly?: boolean }) => Promise<SubtitleRemovalResult>;
-  getSubtitleVersion: (gameId: string) => Promise<string | null>;
+  getSubtitleVersion: (gameId: string, variantKey?: string) => Promise<string | null>;
+  detectGameVariants?: (
+    exePath: string,
+    targetRelativeDir: string | undefined,
+    variants: any[]
+  ) => Promise<{
+    detectedKey: string | null;
+    results: Record<string, { matched: boolean; reasons: string[] }>;
+  }>;
   checkLocalDubbing?: (gameId: string, exePath: string) => Promise<{ installed: boolean; totalBytes: number }>;
   onStatusUpdate: (callback: (status: any) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
@@ -87,6 +97,7 @@ export interface SubtitleConfig {
   isAuthorized?: boolean;
   skipSubtitleInjection?: boolean;
   subtitleVersion?: string;
+  variantKey?: string;
 }
 
 export interface SubtitleRemovalInfo {

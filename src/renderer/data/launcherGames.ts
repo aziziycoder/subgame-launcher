@@ -1,3 +1,18 @@
+export interface LauncherSubtitleVariant {
+  key: string;
+  label: string;
+  subtitleVersion: string;
+  subtitleSize?: string;
+  subtitleDownloadUrl?: string;
+  targetFileName: string;
+  targetRelativeDir?: string;
+  defaultExeName?: string;
+  sortOrder?: number;
+  detectFilesPresent?: string[];
+  detectFilesAbsent?: string[];
+  detectFileSizes?: Record<string, number | { exact?: number; min?: number; max?: number; optional?: boolean }>;
+}
+
 export interface LauncherGame {
   id: string;
   slug: string;
@@ -25,6 +40,7 @@ export interface LauncherGame {
   dubbingPrice?: string;
   dubbingVersion?: string;
   dubbingDownloadUrl?: string;
+  variants?: LauncherSubtitleVariant[];
 }
 
 /**
