@@ -434,7 +434,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
                 </div>
                 <span className="block text-[10px] text-violet-300/90 mt-0.5">
                   {localDubInfo?.installed
-                    ? `Tayyor (${formatSize(localDubInfo.totalBytes)})`
+                    ? 'O‘rnatilgan (Tayyor)'
                     : 'O‘zbekcha ovoz + matn'}
                 </span>
               </button>

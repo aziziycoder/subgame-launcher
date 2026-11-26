@@ -255,21 +255,9 @@ ipcMain.handle('check-local-dubbing', async (_, gameId: string, exePath: string)
       return { installed: false, totalBytes: 0 };
     }
     const gameDir = fs.statSync(exePath).isFile() ? path.dirname(exePath) : exePath;
-    if (gameId === 'need-for-speed-most-wanted') {
-      const copBig = path.join(gameDir, 'SOUND', 'SPEECH', 'copspeech.big');
-      const moviesDir = path.join(gameDir, 'MOVIES');
-      let totalBytes = 0;
-      let hasMovies = false;
-      if (fs.existsSync(copBig)) totalBytes += fs.statSync(copBig).size;
-      if (fs.existsSync(moviesDir)) {
-        for (const f of fs.readdirSync(moviesDir)) {
-          if (f.endsWith('_russian_pal.vp6')) {
-            hasMovies = true;
-            totalBytes += fs.statSync(path.join(moviesDir, f)).size;
-          }
-        }
-      }
-      return { installed: hasMovies && fs.existsSync(copBig), totalBytes };
+    const markerPath = path.join(gameDir, '.subgame_dub_version');
+    if (fs.existsSync(markerPath)) {
+      return { installed: true, totalBytes: 0 };
     }
     return { installed: false, totalBytes: 0 };
   } catch {
