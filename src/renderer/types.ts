@@ -45,6 +45,9 @@ export interface SubGameApi {
     isAuthorized?: boolean;
     skipSubtitleInjection?: boolean;
     subtitleVersion?: string;
+    useDubbing?: boolean;
+    dubbingDownloadUrl?: string;
+    dubbingVersion?: string;
   }) => Promise<{ success: boolean; message: string }>;
   installSubtitle: (config: {
     gameId: string;
@@ -55,6 +58,9 @@ export interface SubGameApi {
     isAuthorized?: boolean;
     skipSubtitleInjection?: boolean;
     subtitleVersion?: string;
+    useDubbing?: boolean;
+    dubbingDownloadUrl?: string;
+    dubbingVersion?: string;
   }) => Promise<{ success: boolean; message: string; targetPath?: string }>;
   openGameFolder: (exePath: string) => Promise<boolean>;
   /** 1.4.6+: eski main kodda yo'q bo'lishi mumkin */

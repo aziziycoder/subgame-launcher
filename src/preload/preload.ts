@@ -9,6 +9,9 @@ export interface GameLaunchConfigPayload {
   isAuthorized?: boolean;
   skipSubtitleInjection?: boolean;
   subtitleVersion?: string;
+  useDubbing?: boolean;
+  dubbingDownloadUrl?: string;
+  dubbingVersion?: string;
 }
 
 export interface SubtitleRemovalInfoPayload {

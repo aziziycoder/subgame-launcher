@@ -121,6 +121,9 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     subtitleVersion: game.version,
     skipSubtitleInjection: Boolean(game.skipSubtitleInjection || !game.targetFileName),
     isAuthorized: true,
+    useDubbing: Boolean(game.hasDubbing && launchMode === 'dubbing'),
+    dubbingDownloadUrl: game.dubbingDownloadUrl,
+    dubbingVersion: game.dubbingVersion,
   });
 
   // Eski (1.4.5 gacha) main kodda bu IPC yo'q: tugma ko'rinmaydi
@@ -216,17 +219,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     setStatusMessage("Subtitr tayyorlanmoqda...");
 
     try {
-      const skipInjection = Boolean(game.skipSubtitleInjection || !game.targetFileName);
-      const res = await window.subgame?.installSubtitle({
-        gameId: game.id,
-        gameExePath: exePath,
-        targetSubtitleFileName: game.targetFileName,
-        targetRelativeDir: game.targetRelativeDir,
-        subtitleDownloadUrl: game.subtitleDownloadUrl,
-        subtitleVersion: game.version,
-        skipSubtitleInjection: skipInjection,
-        isAuthorized: true,
-      });
+      const res = await window.subgame?.installSubtitle(buildSubtitleConfig());
 
       if (res?.success) {
         setInstalledSubtitleVersion(targetVersion);
@@ -273,17 +266,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     setStatusMessage('Boshlanmoqda...');
 
     try {
-      const skipInjection = Boolean(game.skipSubtitleInjection || !game.targetFileName);
-      const res = await window.subgame?.launchGame({
-        gameId: game.id,
-        gameExePath: exePath,
-        targetSubtitleFileName: game.targetFileName,
-        targetRelativeDir: game.targetRelativeDir,
-        subtitleDownloadUrl: game.subtitleDownloadUrl,
-        subtitleVersion: game.version,
-        skipSubtitleInjection: skipInjection,
-        isAuthorized: true,
-      });
+      const res = await window.subgame?.launchGame(buildSubtitleConfig());
 
       if (!res?.success) {
         setError(res?.message || "O'yinni ishga tushirishda xatolik yuz berdi");

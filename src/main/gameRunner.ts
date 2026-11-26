@@ -25,6 +25,9 @@ export interface GameLaunchConfig {
   isAuthorized?: boolean;
   skipSubtitleInjection?: boolean; // For standalone games or games that don't need external subtitle injection
   subtitleVersion?: string; // Real-time subtitle version from the backend (e.g. "v1.1.0")
+  useDubbing?: boolean;
+  dubbingDownloadUrl?: string;
+  dubbingVersion?: string;
 }
 
 interface RunningGameSession {
@@ -778,6 +781,44 @@ export async function injectSubtitleFile(
           fs.cpSync(commonxSrc, path.join(parentGameDir, EXTRA_GAME_DIR), { recursive: true, force: true });
         } catch (cpxErr) {
           console.warn('commonx papkasini nusxalashda ogohlantirish:', cpxErr);
+        }
+      }
+    }
+
+    if (config.useDubbing && config.dubbingDownloadUrl && config.dubbingDownloadUrl.startsWith('http')) {
+      const dubVer = (config.dubbingVersion || 'v1.0.0').trim();
+      const dubMarkerPath = path.join(gameDir, '.subgame_dub_version');
+      let alreadyInstalled = false;
+      try {
+        if (fs.existsSync(dubMarkerPath) && fs.readFileSync(dubMarkerPath, 'utf8').trim() === dubVer) {
+          alreadyInstalled = true;
+        }
+      } catch {}
+
+      if (!alreadyInstalled) {
+        const userDubDir = path.join(app.getPath('userData'), 'dubbing', config.gameId);
+        if (!fs.existsSync(userDubDir)) {
+          fs.mkdirSync(userDubDir, { recursive: true });
+        }
+        const tempDubZip = path.join(userDubDir, `dub_${Date.now()}.zip`);
+        onStatusUpdate?.("O‘zbekcha dublyaj paketi yuklanmoqda...");
+        await downloadSubtitleFile(config.dubbingDownloadUrl, tempDubZip, onStatusUpdate);
+
+        if (fs.existsSync(tempDubZip)) {
+          onStatusUpdate?.("Dublyaj fayllari o‘yin papkasiga joylashtirilmoqda...");
+          let extracted = false;
+          try {
+            execSync(`tar -xf "${tempDubZip}" -C "${gameDir}"`, { stdio: 'ignore', windowsHide: true });
+            extracted = true;
+          } catch {}
+          if (!extracted) {
+            execSync(
+              `powershell -NoProfile -Command "Expand-Archive -LiteralPath '${tempDubZip.replace(/'/g, "''")}' -DestinationPath '${gameDir.replace(/'/g, "''")}' -Force"`,
+              { windowsHide: true }
+            );
+          }
+          try { fs.unlinkSync(tempDubZip); } catch {}
+          try { fs.writeFileSync(dubMarkerPath, dubVer, 'utf8'); } catch {}
         }
       }
     }
