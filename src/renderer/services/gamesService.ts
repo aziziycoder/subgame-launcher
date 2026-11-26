@@ -1,4 +1,4 @@
-import type { LauncherGame } from '../data/launcherGames';
+import type { LauncherGame, LauncherSubtitleVariant } from '../data/launcherGames';
 import { fetchFromBackend } from './apiClient';
 
 /**
@@ -13,6 +13,19 @@ function toAbsoluteUrl(url?: string): string {
 }
 
 /**
+ * Admin panel bo'sh maydonlarni "-" bilan to'ldirib qo'yadi; ularni qiymat yo'q deb hisoblaymiz,
+ * aks holda "-" fayl yoki exe nomi sifatida ishlatilib, o'yin "subtitrsiz" deb belgilanadi.
+ */
+function field(...values: any[]): string | undefined {
+  for (const v of values) {
+    if (typeof v !== 'string') continue;
+    const s = v.trim();
+    if (s && !/^[-–—]+$/.test(s)) return s;
+  }
+  return undefined;
+}
+
+/**
  * Fetch games list purely and dynamically from the backend for the Launcher.
  * 100% dynamic from the central database, no static array fallback.
  */
@@ -21,12 +34,13 @@ function mapRawGameToLauncherGame(data: any, fallbackId?: string): LauncherGame 
   const cov = toAbsoluteUrl(data.cover || data.cardImage || data.card_image);
   const id = data.id || data.slug || fallbackId || 'game';
 
-  let targetFileName = data.targetFileName || data.target_file_name;
-  let targetRelativeDir = data.targetRelativeDir || data.target_relative_dir;
-  let defaultExeName = data.defaultExeName || data.default_exe_name || 'Game.exe';
-  let keyPrefix = data.keyPrefix || data.key_prefix || 'SUB-GAME';
+  let targetFileName = field(data.targetFileName, data.target_file_name);
+  let targetRelativeDir = field(data.targetRelativeDir, data.target_relative_dir);
+  const rawExeName = field(data.defaultExeName, data.default_exe_name);
+  let defaultExeName = rawExeName || 'Game.exe';
+  let keyPrefix = field(data.keyPrefix, data.key_prefix) || 'SUB-GAME';
   let status = data.subtitleStatus || data.subtitle_status || data.status || 'Tayyor';
-  let subtitleSize = data.subtitleSize || data.subtitle_size || '1.5 MB';
+  let subtitleSize = field(data.subtitleSize, data.subtitle_size) || '1.5 MB';
 
   if (id === 'mafia-definitive-edition' || data.slug === 'mafia-definitive-edition') {
     targetFileName = targetFileName || 'stringtable_en.sds';
@@ -40,7 +54,7 @@ function mapRawGameToLauncherGame(data: any, fallbackId?: string): LauncherGame 
   if (id === 'red-dead-redemption-2' || data.slug === 'red-dead-redemption-2') {
     targetFileName = targetFileName || 'rdr2-translator.xml,Translation.xml,rdr2-translator.asi,dinput8.dll,ScriptHookRDR2.dll';
     targetRelativeDir = '';
-    defaultExeName = defaultExeName || 'RDR2.exe';
+    defaultExeName = rawExeName || 'RDR2.exe';
     keyPrefix = 'SUB-RDR2';
     status = 'Tayyor';
     subtitleSize = subtitleSize || '20.0 MB';
@@ -58,6 +72,37 @@ function mapRawGameToLauncherGame(data: any, fallbackId?: string): LauncherGame 
 
   const rawSubUrl = data.subtitleDownloadUrl || data.subtitle_download_url;
   const subUrl = rawSubUrl && rawSubUrl.startsWith('http') ? rawSubUrl : undefined;
+
+  const hasDubbing = Boolean(data.hasDubbing || data.has_dubbing);
+  const dubbingSize = field(data.dubbingSize, data.dubbing_size);
+  const dubbingPrice = field(data.dubbingPrice, data.dubbing_price) || (hasDubbing ? 'Bepul' : undefined);
+  const dubbingVersion = field(data.dubbingVersion, data.dubbing_version) || (hasDubbing ? 'v1.0.0' : undefined);
+  const rawDubUrl = data.dubbingDownloadUrl || data.dubbing_download_url;
+  const dubbingDownloadUrl = rawDubUrl && rawDubUrl.startsWith('http') ? rawDubUrl : undefined;
+
+  const rawVariants = Array.isArray(data.variants) ? data.variants : [];
+  const variants: LauncherSubtitleVariant[] = rawVariants
+    .map((v: any, idx: number) => {
+      const vUrl = v.subtitleDownloadUrl || v.subtitle_download_url;
+      return {
+        key: String(v.key || `variant-${idx + 1}`).trim(),
+        label: String(v.label || v.key || `Versiya ${idx + 1}`).trim(),
+        subtitleVersion: String(v.subtitleVersion || v.subtitle_version || data.subtitleVersion || 'v1.0.0').trim(),
+        subtitleSize: field(v.subtitleSize, v.subtitle_size) || subtitleSize,
+        subtitleDownloadUrl: vUrl && String(vUrl).startsWith('http') ? String(vUrl) : undefined,
+        targetFileName: field(v.targetFileName, v.target_file_name) || targetFileName || '',
+        targetRelativeDir: field(v.targetRelativeDir, v.target_relative_dir) ?? targetRelativeDir,
+        defaultExeName: field(v.defaultExeName, v.default_exe_name) || defaultExeName,
+        sortOrder: typeof v.sortOrder === 'number' ? v.sortOrder : (typeof v.sort_order === 'number' ? v.sort_order : idx),
+        detectFilesPresent: Array.isArray(v.detectFilesPresent || v.detect_files_present) ? (v.detectFilesPresent || v.detect_files_present) : [],
+        detectFilesAbsent: Array.isArray(v.detectFilesAbsent || v.detect_files_absent) ? (v.detectFilesAbsent || v.detect_files_absent) : [],
+        detectFileSizes: (v.detectFileSizes || v.detect_file_sizes) && typeof (v.detectFileSizes || v.detect_file_sizes) === 'object'
+          ? (v.detectFileSizes || v.detect_file_sizes)
+          : {},
+      };
+    })
+    .filter((v: LauncherSubtitleVariant) => Boolean(v.key && v.targetFileName))
+    .sort((a: LauncherSubtitleVariant, b: LauncherSubtitleVariant) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
   return {
     id,
@@ -81,6 +126,12 @@ function mapRawGameToLauncherGame(data: any, fallbackId?: string): LauncherGame 
     subtitleDownloadUrl: isStandalone ? undefined : subUrl,
     isStandalone,
     skipSubtitleInjection: isStandalone,
+    hasDubbing,
+    dubbingSize,
+    dubbingPrice,
+    dubbingVersion,
+    dubbingDownloadUrl,
+    variants: variants.length > 0 ? variants : undefined,
   };
 }
 

@@ -25,6 +25,10 @@ export interface GameLaunchConfig {
   isAuthorized?: boolean;
   skipSubtitleInjection?: boolean; // For standalone games or games that don't need external subtitle injection
   subtitleVersion?: string; // Real-time subtitle version from the backend (e.g. "v1.1.0")
+  variantKey?: string; // Selected game variant key (e.g. "torrent", "steam")
+  useDubbing?: boolean;
+  dubbingDownloadUrl?: string;
+  dubbingVersion?: string;
 }
 
 interface RunningGameSession {
@@ -32,13 +36,55 @@ interface RunningGameSession {
   gameId: string;
 }
 
-const activeSessions = new Map<string, RunningGameSession>();
+export const activeSessions = new Map<string, RunningGameSession>();
+
+/** O'yin papkasiga butunligicha ko'chiriladigan qo'shimcha papka (RDR2: commonx/data/ui/fontmap.xml) */
+export const EXTRA_GAME_DIR = 'commonx';
+
+/** O'yin jarayoni shu vaqt ichida paydo bo'lmasa, ulangan fayllar qaytarib olinadi */
+const DEFAULT_STARTUP_GRACE_SEC = 30;
+
+interface LaunchPlan {
+  /** Ishga tushiriladigan exe (o'yinning o'zi yoki uning launcheri) */
+  exePath: string;
+  /** Kuzatiladigan o'yin jarayoni nomining boshi */
+  processPattern: string;
+  startupGraceSec: number;
+}
+
+/**
+ * Ba'zi o'yinlarni o'z exe'si orqali to'g'ridan-to'g'ri ochib bo'lmaydi. RDR2.exe to'g'ridan-to'g'ri
+ * ishga tushirilsa "ERR_NO_LAUNCHER" beradi: uni Rockstar launcheri (PlayRDR2.exe) yoki o'yin
+ * papkasidagi Launcher.exe ochishi kerak, u esa o'zi RDR2.exe ni ancha kechikib ishga tushiradi.
+ * Shuning uchun launcherni ochamiz, lekin kuzatishni RDR2 jarayoni bo'yicha olib boramiz.
+ */
+export function resolveLaunchPlan(config: GameLaunchConfig, gameDir: string): LaunchPlan {
+  const rawExeName = path.basename(config.gameExePath, path.extname(config.gameExePath));
+  let processPattern = rawExeName.replace(/[-_](Win64|Win32|Shipping|x64|x86)+.*$/i, '');
+  if (processPattern.length < 3) {
+    processPattern = rawExeName;
+  }
+
+  if (config.gameId === 'red-dead-redemption-2') {
+    const starters = ['Launcher.exe', 'PlayRDR2.exe'];
+    const starter = /^rdr2$/i.test(rawExeName)
+      ? starters.map((s) => path.join(gameDir, s)).find((p) => fs.existsSync(p))
+      : undefined;
+    return {
+      exePath: starter || config.gameExePath,
+      processPattern: 'RDR2',
+      startupGraceSec: 300,
+    };
+  }
+
+  return { exePath: config.gameExePath, processPattern, startupGraceSec: DEFAULT_STARTUP_GRACE_SEC };
+}
 
 /**
  * Foydalanuvchiga ko'rsatiladigan xato matnidan fayl yo'llari va nomlarini olib tashlaydi
  * (qaysi fayl yuklanayotgani/qo'yilayotgani launcherda ko'rinmasligi kerak).
  */
-function hideFileDetails(err: any): string {
+export function hideFileDetails(err: any): string {
   const msg = String(err?.message || err || '');
   return msg
     .replace(/[A-Za-z]:[\\/][^\s'"`,;)]+/g, '')
@@ -72,7 +118,8 @@ export function isProcessRunning(pattern: string): boolean {
 export function spawnDetachedCleanupWatcher(
   pattern: string,
   filesOrDest: string | InjectedFileInfo[],
-  legacyBackupPath?: string
+  legacyBackupPath?: string,
+  startupGraceSec: number = DEFAULT_STARTUP_GRACE_SEC
 ): void {
   try {
     const fileEntries: Array<{ dest: string; bak: string; kind: string }> = Array.isArray(filesOrDest)
@@ -90,7 +137,7 @@ export function spawnDetachedCleanupWatcher(
       $pattern = '${escapedPattern}';
       $files = @(${fileArrayScript});
       $t = 0;
-      while (!(Get-Process -Name $pattern* -ErrorAction SilentlyContinue) -and $t -lt 30) {
+      while (!(Get-Process -Name $pattern* -ErrorAction SilentlyContinue) -and $t -lt ${Math.max(1, Math.round(startupGraceSec))}) {
         Start-Sleep -Seconds 1;
         $t++;
       };
@@ -190,20 +237,159 @@ export function safeWriteFileSync(destination: string, data: Buffer): void {
   }
 }
 
+export function getSubtitleCacheDir(gameId: string, variantKey?: string): string {
+  const safeVariant = variantKey && /^[a-z0-9._-]+$/i.test(variantKey.trim()) ? variantKey.trim() : '';
+  return safeVariant
+    ? path.join(app.getPath('userData'), 'subtitles', gameId, safeVariant)
+    : path.join(app.getPath('userData'), 'subtitles', gameId);
+}
+
+function getLastInjectedManifestPath(gameId: string): string {
+  return path.join(app.getPath('userData'), 'subtitles', gameId, 'last_injected.json');
+}
+
+export function clearLastInjectedManifest(gameId: string): void {
+  try {
+    const p = getLastInjectedManifestPath(gameId);
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  } catch {}
+}
+
+/**
+ * O'yin papkasidagi fayllar asosida variant mosligini tekshirish (hech qanday papka yaratmaydi)
+ */
+export function evaluateVariantRules(
+  exePath: string,
+  defaultRelativeDir: string | undefined,
+  variants: Array<{
+    key: string;
+    targetRelativeDir?: string;
+    detectFilesPresent?: string[];
+    detectFilesAbsent?: string[];
+    detectFileSizes?: Record<string, number | { exact?: number; min?: number; max?: number; optional?: boolean }>;
+  }>
+): {
+  detectedKey: string | null;
+  results: Record<string, { matched: boolean; reasons: string[] }>;
+} {
+  const results: Record<string, { matched: boolean; reasons: string[] }> = {};
+  if (!exePath || !fs.existsSync(exePath) || !Array.isArray(variants) || variants.length === 0) {
+    return { detectedKey: null, results };
+  }
+
+  const gameDir = fs.statSync(exePath).isFile() ? path.dirname(exePath) : exePath;
+
+  const findExistingDir = (relDir?: string): string => {
+    if (relDir && relDir !== '.') {
+      const candidates = [
+        path.join(gameDir, relDir),
+        path.resolve(gameDir, '../../..', relDir),
+        path.resolve(gameDir, '../..', relDir),
+        path.resolve(gameDir, '..', relDir),
+      ];
+      const found = candidates.find((c) => fs.existsSync(c));
+      if (found) return found;
+    }
+    return gameDir;
+  };
+
+  const resolveFileInDirs = (dir: string, fileName: string): string | null => {
+    const p1 = path.join(dir, fileName);
+    if (fs.existsSync(p1)) return p1;
+    const p2 = path.join(gameDir, fileName);
+    if (fs.existsSync(p2)) return p2;
+    return null;
+  };
+
+  let detectedKey: string | null = null;
+
+  for (const v of variants) {
+    const reasons: string[] = [];
+    const rel = v.targetRelativeDir ?? defaultRelativeDir;
+    const dir = findExistingDir(rel);
+
+    const presentList = Array.isArray(v.detectFilesPresent) ? v.detectFilesPresent : [];
+    const absentList = Array.isArray(v.detectFilesAbsent) ? v.detectFilesAbsent : [];
+    const sizeRules = v.detectFileSizes && typeof v.detectFileSizes === 'object' ? v.detectFileSizes : {};
+
+    const hasAnyRule = presentList.length > 0 || absentList.length > 0 || Object.keys(sizeRules).length > 0;
+    if (!hasAnyRule) {
+      results[v.key] = { matched: true, reasons: [] };
+      continue;
+    }
+
+    for (const f of presentList) {
+      if (!resolveFileInDirs(dir, f)) {
+        reasons.push(`Kerakli fayl topilmadi: ${f}`);
+      }
+    }
+
+    for (const f of absentList) {
+      if (resolveFileInDirs(dir, f)) {
+        reasons.push(`Mos kelmaydigan fayl mavjud: ${f}`);
+      }
+    }
+
+    for (const [f, rule] of Object.entries(sizeRules)) {
+      // Agar zaxira fayl (.subgame_bak) bo'lsa, asl o'lchamni zaxiradan tekshiramiz
+      const bakPath = resolveFileInDirs(dir, `${f}.subgame_bak`);
+      const filePath = bakPath || resolveFileInDirs(dir, f);
+      if (!filePath) {
+        if (typeof rule === 'object' && rule !== null && (rule.optional || rule.max !== undefined)) {
+          continue;
+        }
+        reasons.push(`Fayl topilmadi: ${f}`);
+        continue;
+      }
+      const size = fs.statSync(filePath).size;
+      if (typeof rule === 'number') {
+        if (size !== rule) {
+          reasons.push(`${f} hajmi mos emas (${size} != ${rule} bayt)`);
+        }
+      } else if (rule && typeof rule === 'object') {
+        if (rule.exact !== undefined && size !== rule.exact) {
+          reasons.push(`${f} hajmi mos emas (${size} != ${rule.exact} bayt)`);
+        }
+        if (rule.min !== undefined && size < rule.min) {
+          reasons.push(`${f} hajmi kichik (${size} < ${rule.min} bayt)`);
+        }
+        if (rule.max !== undefined && size > rule.max) {
+          reasons.push(`${f} hajmi katta (${size} > ${rule.max} bayt)`);
+        }
+      }
+    }
+
+    const matched = reasons.length === 0;
+    results[v.key] = { matched, reasons };
+    if (matched && !detectedKey) {
+      detectedKey = v.key;
+    }
+  }
+
+  return { detectedKey, results };
+}
+
 /**
  * Subtitr manba faylini qidirish (shifrlangan .enc yoki asl fayl)
  */
 export function findSubtitleSource(
   gameId: string,
-  fileName: string
+  fileName: string,
+  variantKey?: string
 ): { path: string; isEncrypted: boolean } | null {
   const encName = `${fileName}.enc`;
+  const userCache = getSubtitleCacheDir(gameId, variantKey);
+  const safeVariant = variantKey && /^[a-z0-9._-]+$/i.test(variantKey.trim()) ? variantKey.trim() : '';
 
   const resPath = process.resourcesPath;
   // Avval shifrlangan .enc faylni qidiramiz, keyin asl faylni
   for (const f of [encName, fileName]) {
     const candidatePaths = [
-      path.join(app.getPath('userData'), 'subtitles', gameId, f),
+      path.join(userCache, f),
+      ...(safeVariant && resPath ? [
+        path.join(resPath, 'subtitles', gameId, safeVariant, f),
+        path.join(resPath, 'public', 'subtitles', gameId, safeVariant, f),
+      ] : []),
       ...(resPath ? [
         path.join(resPath, 'subtitles', gameId, f),
         path.join(resPath, 'public', 'subtitles', gameId, f),
@@ -393,6 +579,28 @@ export async function downloadSubtitleFile(
 }
 
 /**
+ * O'yin papkasiga qo'yiladigan subtitr fayllari nomlari (masalan "stringtable_en.sds,stringtable_ru.sds").
+ */
+export function resolveSubtitleFileNames(config: GameLaunchConfig, destDir: string): string[] {
+  const fileNames = (config.targetSubtitleFileName || '')
+    .split(/[,;|]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Mafia: Definitive Edition uchun agar faqat stringtable_en.sds ko'rsatilgan bo'lsa ham,
+  // o'yin papkasida stringtable_ru.sds bo'lsa, ikkala til foydalanuvchilariga ham ishlashi uchun uni ham qo'shamiz
+  if (
+    config.gameId === 'mafia-definitive-edition' ||
+    config.gameExePath.toLowerCase().includes('mafiadefinitiveedition')
+  ) {
+    if (!fileNames.includes('stringtable_ru.sds') && fs.existsSync(path.join(destDir, 'stringtable_ru.sds'))) {
+      fileNames.push('stringtable_ru.sds');
+    }
+  }
+  return fileNames;
+}
+
+/**
  * Subtitr faylini o'yin papkasiga xavfsiz dekodlab joylash
  * Bir yoki bir nechta subtitr fayllarini qo'llab-quvvatlaydi (masalan, stringtable_en.sds,stringtable_ru.sds)
  */
@@ -435,23 +643,21 @@ export async function injectSubtitleFile(
       }
     } catch {}
 
-    const fileNames = config.targetSubtitleFileName
-      .split(/[,;|]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const fileNames = resolveSubtitleFileNames(config, destDir);
 
-    // Mafia: Definitive Edition uchun agar faqat stringtable_en.sds ko'rsatilgan bo'lsa ham,
-    // o'yin papkasida stringtable_ru.sds bo'lsa, ikkala til foydalanuvchilariga ham ishlashi uchun uni ham qo'shamiz
-    if (
-      config.gameId === 'mafia-definitive-edition' ||
-      config.gameExePath.toLowerCase().includes('mafiadefinitiveedition')
-    ) {
-      if (!fileNames.includes('stringtable_ru.sds') && fs.existsSync(path.join(destDir, 'stringtable_ru.sds'))) {
-        fileNames.push('stringtable_ru.sds');
-      }
+    // Oldingi sessiya qulab qolgan yoki variant almashtirilgan bo'lsa, qolib ketgan fayllarni tiklaymiz
+    const manifestPath = getLastInjectedManifestPath(config.gameId);
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const prev = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        if (Array.isArray(prev?.files) && prev.files.length > 0) {
+          await restoreInjectedFiles(prev.files, config.gameExePath);
+        }
+      } catch {}
+      clearLastInjectedManifest(config.gameId);
     }
 
-    const userSubDir = path.join(app.getPath('userData'), 'subtitles', config.gameId);
+    const userSubDir = getSubtitleCacheDir(config.gameId, config.variantKey);
     const versionFilePath = path.join(userSubDir, 'version.txt');
 
     // Subtitr versiyasini tekshirish (Subtitle Version Auto-Updater)
@@ -485,11 +691,14 @@ export async function injectSubtitleFile(
             if (fs.existsSync(oldEnc)) fs.unlinkSync(oldEnc);
           } catch {}
         }
+        try {
+          fs.rmSync(path.join(userSubDir, EXTRA_GAME_DIR), { recursive: true, force: true });
+        } catch {}
       }
     }
 
     // Agar lokal papkalarda barcha fayllar topilmasa va server URL berilgan bo'lsa, yuklab olamiz
-    let allFound = !needsVersionUpdate && fileNames.every((f) => findSubtitleSource(config.gameId, f) !== null);
+    let allFound = !needsVersionUpdate && fileNames.every((f) => findSubtitleSource(config.gameId, f, config.variantKey) !== null);
 
     if (!allFound && config.subtitleDownloadUrl && config.subtitleDownloadUrl.startsWith('http')) {
       try {
@@ -538,12 +747,16 @@ export async function injectSubtitleFile(
             try {
               const subEntries = fs.readdirSync(userSubDir, { withFileTypes: true });
               for (const subEntry of subEntries) {
-                if (subEntry.isDirectory()) {
+                // commonx — o'yin papkasiga butunligicha ko'chiriladigan papka (RDR2 fontmap), uni yoymaymiz
+                if (subEntry.isDirectory() && subEntry.name.toLowerCase() !== EXTRA_GAME_DIR) {
                   const nestedDir = path.join(userSubDir, subEntry.name);
                   const nestedFiles = fs.readdirSync(nestedDir);
                   for (const nf of nestedFiles) {
                     const srcP = path.join(nestedDir, nf);
                     const dstP = path.join(userSubDir, nf);
+                    if (nf.toLowerCase() === EXTRA_GAME_DIR && fs.existsSync(dstP)) {
+                      try { fs.rmSync(dstP, { recursive: true, force: true }); } catch {}
+                    }
                     if (!fs.existsSync(dstP)) {
                       try { fs.renameSync(srcP, dstP); } catch {}
                     }
@@ -585,12 +798,16 @@ export async function injectSubtitleFile(
       const destFilePath = path.join(destDir, targetFileName);
       const backupFilePath = path.join(destDir, `${targetFileName}.subgame_bak`);
 
-      let source = findSubtitleSource(config.gameId, targetFileName);
+      let source = findSubtitleSource(config.gameId, targetFileName, config.variantKey);
 
       // Agar aynan shu nomdagi manba topilmasa, lekin boshqa fayl yuklangan bo'lsa (masalan, EN -> RU nusxalash)
+      // Faqat bir xil kengaytmali fayl (stringtable_en.sds -> _ru.sds). Aks holda RDR2'da XML
+      // dinput8.dll nomi bilan yozilib, o'yinni buzib qo'yardi.
       if (!source) {
+        const wantExt = path.extname(targetFileName).toLowerCase();
         for (const otherF of fileNames) {
-          const altSource = findSubtitleSource(config.gameId, otherF);
+          if (otherF === targetFileName || path.extname(otherF).toLowerCase() !== wantExt) continue;
+          const altSource = findSubtitleSource(config.gameId, otherF, config.variantKey);
           if (altSource) {
             source = altSource;
             break;
@@ -699,21 +916,75 @@ export async function injectSubtitleFile(
     }
 
     // Agar o'yin papkasida qo'shimcha papkalar kerak bo'lsa (masalan RDR2 fontmap uchun commonx)
-    for (const injected of injectedList) {
-      if (injected.destFilePath) {
-        const parentGameDir = path.dirname(injected.destFilePath);
-        const subGamePublicDir = path.join(app.getAppPath(), 'public', 'subtitles', config.gameId);
-        const commonxSrc = path.join(subGamePublicDir, 'commonx');
-        const commonxDst = path.join(parentGameDir, 'commonx');
-        if (fs.existsSync(commonxSrc) && !fs.existsSync(commonxDst)) {
-          try {
-            fs.cpSync(commonxSrc, commonxDst, { recursive: true });
-          } catch (cpxErr) {
-            console.warn('commonx papkasini nusxalashda ogohlantirish:', cpxErr);
-          }
+    // Yuklangan paket (userData) birinchi, keyin exe ichidagi zaxira. Faqat biz tarqatadigan
+    // fayllar yangilanadi; o'yinchining commonx ichidagi boshqa modlariga tegilmaydi.
+    if (injectedList.length > 0) {
+      const parentGameDir = path.dirname(injectedList[0].destFilePath);
+      const commonxCandidates = [
+        path.join(userSubDir, EXTRA_GAME_DIR),
+        ...(process.resourcesPath ? [path.join(process.resourcesPath, 'subtitles', config.gameId, EXTRA_GAME_DIR)] : []),
+        path.join(app.getAppPath(), 'public', 'subtitles', config.gameId, EXTRA_GAME_DIR),
+      ];
+      const commonxSrc = commonxCandidates.find((p) => {
+        try { return fs.statSync(p).isDirectory(); } catch { return false; }
+      });
+      if (commonxSrc) {
+        try {
+          fs.cpSync(commonxSrc, path.join(parentGameDir, EXTRA_GAME_DIR), { recursive: true, force: true });
+        } catch (cpxErr) {
+          console.warn('commonx papkasini nusxalashda ogohlantirish:', cpxErr);
         }
-        break;
       }
+    }
+
+    if (config.useDubbing && config.dubbingDownloadUrl && config.dubbingDownloadUrl.startsWith('http')) {
+      const dubVer = (config.dubbingVersion || 'v1.0.0').trim();
+      const dubMarkerPath = path.join(gameDir, '.subgame_dub_version');
+      let alreadyInstalled = false;
+      try {
+        if (fs.existsSync(dubMarkerPath) && fs.readFileSync(dubMarkerPath, 'utf8').trim() === dubVer) {
+          alreadyInstalled = true;
+        }
+      } catch {}
+
+      if (!alreadyInstalled) {
+        const userDubDir = path.join(app.getPath('userData'), 'dubbing', config.gameId);
+        if (!fs.existsSync(userDubDir)) {
+          fs.mkdirSync(userDubDir, { recursive: true });
+        }
+        const tempDubZip = path.join(userDubDir, `dub_${Date.now()}.zip`);
+        onStatusUpdate?.("O‘zbekcha dublyaj paketi yuklanmoqda...");
+        await downloadSubtitleFile(config.dubbingDownloadUrl, tempDubZip, onStatusUpdate);
+
+        if (fs.existsSync(tempDubZip)) {
+          onStatusUpdate?.("Dublyaj fayllari o‘yin papkasiga joylashtirilmoqda...");
+          let extracted = false;
+          try {
+            execSync(`tar -xf "${tempDubZip}" -C "${gameDir}"`, { stdio: 'ignore', windowsHide: true });
+            extracted = true;
+          } catch {}
+          if (!extracted) {
+            execSync(
+              `powershell -NoProfile -Command "Expand-Archive -LiteralPath '${tempDubZip.replace(/'/g, "''")}' -DestinationPath '${gameDir.replace(/'/g, "''")}' -Force"`,
+              { windowsHide: true }
+            );
+          }
+          try { fs.unlinkSync(tempDubZip); } catch {}
+          try { fs.writeFileSync(dubMarkerPath, dubVer, 'utf8'); } catch {}
+        }
+      }
+    }
+
+    if (injectedList.length > 0) {
+      try {
+        const manifestPath = getLastInjectedManifestPath(config.gameId);
+        fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+        fs.writeFileSync(
+          manifestPath,
+          JSON.stringify({ variantKey: config.variantKey || null, files: injectedList }),
+          'utf8'
+        );
+      } catch {}
     }
 
     return {
@@ -837,29 +1108,27 @@ export async function launchGameWithProtection(
 
     onStatusUpdate("O'yin ishga tushirilmoqda...");
 
-    // Extract process pattern (e.g. Stray from Stray.exe or Stray-Win64-Shipping.exe)
-    const rawExeName = path.basename(config.gameExePath, path.extname(config.gameExePath));
-    let processPattern = rawExeName.replace(/[-_](Win64|Win32|Shipping|x64|x86)+.*$/i, '');
-    if (processPattern.length < 3) {
-      processPattern = rawExeName;
-    }
+    // Ishga tushiriladigan exe va kuzatiladigan jarayon (Stray.exe -> Stray; RDR2 -> Launcher.exe, kuzatish RDR2)
+    const plan = resolveLaunchPlan(config, gameDir);
+    const processPattern = plan.processPattern;
 
     // 4. Launch Game process
     let gameProcess: ChildProcess | null = null;
     try {
-      gameProcess = await spawnGameProcess(config.gameExePath, gameDir);
+      gameProcess = await spawnGameProcess(plan.exePath, gameDir);
     } catch (spawnErr: any) {
       let started = false;
       if (needsElevation(spawnErr)) {
         onStatusUpdate("O'yin administrator ruxsatini so'rayapti...");
         try {
-          await startGameElevated(config.gameExePath, gameDir);
+          await startGameElevated(plan.exePath, gameDir);
           started = true;
         } catch {}
       }
       if (!started) {
         if (shouldInject && injectedList.length > 0) {
           await restoreInjectedFiles(injectedList, config.gameExePath);
+          clearLastInjectedManifest(config.gameId);
         }
         return {
           success: false,
@@ -877,7 +1146,7 @@ export async function launchGameWithProtection(
 
     // Windows mustaqil tozalovchi jarayonini ishga tushiramiz (Launcher yopilsa ham fonda ishlaydi)
     if (shouldInject && injectedList.length > 0) {
-      spawnDetachedCleanupWatcher(processPattern, injectedList);
+      spawnDetachedCleanupWatcher(processPattern, injectedList, undefined, plan.startupGraceSec);
     }
 
     onStatusUpdate("O'yin faol va o'zbekcha subtitrlar ulandi. Maroqli hordiq!");
@@ -894,14 +1163,15 @@ export async function launchGameWithProtection(
         gameHasStarted = true;
       }
 
-      // O'yin ishga tushib keyin yopilsa, yoki 30 soniya ichida umuman boshlanmasa
-      if ((gameHasStarted && !isRunning) || (!gameHasStarted && checkCount > 15)) {
+      // O'yin ishga tushib keyin yopilsa, yoki kutish vaqti ichida umuman boshlanmasa (2 soniyalik qadam)
+      if ((gameHasStarted && !isRunning) || (!gameHasStarted && checkCount > plan.startupGraceSec / 2)) {
         clearInterval(monitorInterval);
         activeSessions.delete(config.gameId);
         onStatusUpdate("O'yin yakunlandi. Subtitrlar himoyalanmoqda...");
 
         if (shouldInject && injectedList.length > 0) {
           await restoreInjectedFiles(injectedList, config.gameExePath);
+          clearLastInjectedManifest(config.gameId);
         }
 
         onStatusUpdate('Tayyor');

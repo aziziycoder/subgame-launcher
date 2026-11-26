@@ -113,6 +113,7 @@ export function validateKeyFormat(key: string): { valid: boolean; gameId?: strin
   if (prefix === 'OUTW') gameId = 'outward-2';
   if (prefix === 'DEMO') gameId = 'demo-game';
   if (prefix === 'RDR1') gameId = 'red-dead-redemption';
+  if (prefix === 'RDR2') gameId = 'red-dead-redemption-2';
   if (prefix === 'STRA') gameId = 'stray';
   if (prefix === 'RE2R') gameId = 'resident-evil-2-remake';
   if (prefix === 'RLPA') gameId = 'rusty-lake-paradise';

@@ -9,6 +9,32 @@ export interface GameLaunchConfigPayload {
   isAuthorized?: boolean;
   skipSubtitleInjection?: boolean;
   subtitleVersion?: string;
+  variantKey?: string;
+  useDubbing?: boolean;
+  dubbingDownloadUrl?: string;
+  dubbingVersion?: string;
+}
+
+export interface SubtitleRemovalInfoPayload {
+  success: boolean;
+  message?: string;
+  cacheBytes: number;
+  gameFolderBytes: number;
+  totalBytes: number;
+  gameFolderItems: number;
+  gameFolderFound: boolean;
+  gameRunning: boolean;
+  filesLocked?: boolean;
+  nothingToRemove: boolean;
+  needsVerify: boolean;
+}
+
+export interface SubtitleRemovalResultPayload {
+  success: boolean;
+  message: string;
+  freedBytes?: number;
+  needsVerify?: boolean;
+  code?: 'running' | 'locked' | 'folder-missing' | 'error';
 }
 
 export interface SubGameApi {
@@ -19,7 +45,21 @@ export interface SubGameApi {
   launchGame: (config: GameLaunchConfigPayload) => Promise<{ success: boolean; message: string }>;
   installSubtitle: (config: GameLaunchConfigPayload) => Promise<{ success: boolean; message: string; targetPath?: string }>;
   openGameFolder: (exePath: string) => Promise<boolean>;
-  getSubtitleVersion: (gameId: string) => Promise<string | null>;
+  getSubtitleRemovalInfo: (config: GameLaunchConfigPayload) => Promise<SubtitleRemovalInfoPayload>;
+  removeSubtitle: (
+    config: GameLaunchConfigPayload,
+    options?: { cacheOnly?: boolean }
+  ) => Promise<SubtitleRemovalResultPayload>;
+  getSubtitleVersion: (gameId: string, variantKey?: string) => Promise<string | null>;
+  detectGameVariants: (
+    exePath: string,
+    targetRelativeDir: string | undefined,
+    variants: any[]
+  ) => Promise<{
+    detectedKey: string | null;
+    results: Record<string, { matched: boolean; reasons: string[] }>;
+  }>;
+  checkLocalDubbing: (gameId: string, exePath: string) => Promise<{ installed: boolean; totalBytes: number }>;
   onStatusUpdate: (callback: (status: any) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
   openExternal: (url: string) => void;
@@ -38,7 +78,12 @@ const api: SubGameApi = {
   launchGame: (config) => ipcRenderer.invoke('launch-game', config),
   installSubtitle: (config) => ipcRenderer.invoke('install-subtitle', config),
   openGameFolder: (exePath) => ipcRenderer.invoke('open-game-folder', exePath),
-  getSubtitleVersion: (gameId: string) => ipcRenderer.invoke('get-subtitle-version', gameId),
+  getSubtitleRemovalInfo: (config) => ipcRenderer.invoke('get-subtitle-removal-info', config),
+  removeSubtitle: (config, options) => ipcRenderer.invoke('remove-subtitle', config, options),
+  getSubtitleVersion: (gameId: string, variantKey?: string) => ipcRenderer.invoke('get-subtitle-version', gameId, variantKey),
+  detectGameVariants: (exePath: string, targetRelativeDir: string | undefined, variants: any[]) =>
+    ipcRenderer.invoke('detect-game-variants', exePath, targetRelativeDir, variants),
+  checkLocalDubbing: (gameId: string, exePath: string) => ipcRenderer.invoke('check-local-dubbing', gameId, exePath),
   onStatusUpdate: (callback) => {
     const handler = (_: any, status: string) => callback(status);
     ipcRenderer.on('game-status', handler);

@@ -44,8 +44,11 @@ export async function checkForAppUpdate(): Promise<{
       const data = (await res.json()) as AppUpdateInfo;
       if (data && data.version) {
         const updateAvailable = compareVersions(data.version, currentVersion) > 0;
-        // Barcha yangilanishlar doimiy majburiy (majburiy update)
-        const isForceUpdate = updateAvailable;
+        // Faqat minRequiredVersion dan eski launcher majburiy yangilanadi; qolganlarga ixtiyoriy
+        const isForceUpdate =
+          updateAvailable &&
+          !!data.minRequiredVersion &&
+          compareVersions(currentVersion, data.minRequiredVersion) < 0;
         return { updateAvailable, isForceUpdate, currentVersion, latestInfo: data };
       }
     }

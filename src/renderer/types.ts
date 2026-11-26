@@ -45,6 +45,10 @@ export interface SubGameApi {
     isAuthorized?: boolean;
     skipSubtitleInjection?: boolean;
     subtitleVersion?: string;
+    variantKey?: string;
+    useDubbing?: boolean;
+    dubbingDownloadUrl?: string;
+    dubbingVersion?: string;
   }) => Promise<{ success: boolean; message: string }>;
   installSubtitle: (config: {
     gameId: string;
@@ -55,9 +59,25 @@ export interface SubGameApi {
     isAuthorized?: boolean;
     skipSubtitleInjection?: boolean;
     subtitleVersion?: string;
+    variantKey?: string;
+    useDubbing?: boolean;
+    dubbingDownloadUrl?: string;
+    dubbingVersion?: string;
   }) => Promise<{ success: boolean; message: string; targetPath?: string }>;
   openGameFolder: (exePath: string) => Promise<boolean>;
-  getSubtitleVersion: (gameId: string) => Promise<string | null>;
+  /** 1.4.6+: eski main kodda yo'q bo'lishi mumkin */
+  getSubtitleRemovalInfo?: (config: SubtitleConfig) => Promise<SubtitleRemovalInfo>;
+  removeSubtitle?: (config: SubtitleConfig, options?: { cacheOnly?: boolean }) => Promise<SubtitleRemovalResult>;
+  getSubtitleVersion: (gameId: string, variantKey?: string) => Promise<string | null>;
+  detectGameVariants?: (
+    exePath: string,
+    targetRelativeDir: string | undefined,
+    variants: any[]
+  ) => Promise<{
+    detectedKey: string | null;
+    results: Record<string, { matched: boolean; reasons: string[] }>;
+  }>;
+  checkLocalDubbing?: (gameId: string, exePath: string) => Promise<{ installed: boolean; totalBytes: number }>;
   onStatusUpdate: (callback: (status: any) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
   openExternal: (url: string) => void;
@@ -66,6 +86,40 @@ export interface SubGameApi {
   applyUpdate: (tempPath: string) => Promise<{ success: boolean; error?: string; fallbackToFull?: boolean }>;
   getUpdateInfo?: () => Promise<{ builtinVersion: string; blockedPatchVersions: string[] }>;
   onUpdateProgress: (callback: (progress: { percent: number; transferred: number; total: number }) => void) => () => void;
+}
+
+export interface SubtitleConfig {
+  gameId: string;
+  gameExePath: string;
+  targetSubtitleFileName?: string;
+  targetRelativeDir?: string;
+  subtitleDownloadUrl?: string;
+  isAuthorized?: boolean;
+  skipSubtitleInjection?: boolean;
+  subtitleVersion?: string;
+  variantKey?: string;
+}
+
+export interface SubtitleRemovalInfo {
+  success: boolean;
+  message?: string;
+  cacheBytes: number;
+  gameFolderBytes: number;
+  totalBytes: number;
+  gameFolderItems: number;
+  gameFolderFound: boolean;
+  gameRunning: boolean;
+  filesLocked?: boolean;
+  nothingToRemove: boolean;
+  needsVerify: boolean;
+}
+
+export interface SubtitleRemovalResult {
+  success: boolean;
+  message: string;
+  freedBytes?: number;
+  needsVerify?: boolean;
+  code?: 'running' | 'locked' | 'folder-missing' | 'error';
 }
 
 declare global {

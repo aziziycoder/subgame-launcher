@@ -1,6 +1,48 @@
 import React, { useState, useEffect } from 'react';
-import { Play, FolderOpen, AlertCircle, X, CheckCircle2, Loader2, Sparkles, Globe, DownloadCloud, ExternalLink, ShieldCheck } from 'lucide-react';
+import { Play, FolderOpen, AlertCircle, X, CheckCircle2, Loader2, Sparkles, Globe, DownloadCloud, ExternalLink, ShieldCheck, Trash2, Mic, FileText, Gamepad2 } from 'lucide-react';
 import { LauncherGame } from '../data/launcherGames';
+import type { SubtitleRemovalInfo } from '../types';
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes > 0) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return '0 MB';
+}
+
+function renderVariantIcon(key: string, label: string) {
+  const haystack = `${key} ${label}`.toLowerCase();
+  if (haystack.includes('steam')) {
+    return (
+      <svg viewBox="0 0 65 65" className="w-4 h-4 shrink-0" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="steam-btn-grad" x1="50%" y1="0%" x2="50%" y2="100%">
+            <stop stopColor="#111d2e" offset="0%" />
+            <stop stopColor="#134b7e" offset="65%" />
+            <stop stopColor="#1387b8" offset="100%" />
+          </linearGradient>
+        </defs>
+        <path
+          d="M1.305 41.202C5.259 54.386 17.488 64 31.959 64c17.673 0 32-14.327 32-32s-14.327-32-32-32C15.001 0 1.124 13.193.028 29.874c2.074 3.477 2.879 5.628 1.275 11.328z"
+          fill="url(#steam-btn-grad)"
+        />
+        <path
+          d="M30.31 23.985l.003.158-7.83 11.375c-1.268-.058-2.54.165-3.748.662a8.14 8.14 0 0 0-1.498.8L.042 29.893s-.398 6.546 1.26 11.424l12.156 5.016c.6 2.728 2.48 5.12 5.242 6.27a8.88 8.88 0 0 0 11.603-4.782 8.89 8.89 0 0 0 .684-3.656L42.18 36.16l.275.005c6.705 0 12.155-5.466 12.155-12.18s-5.44-12.16-12.155-12.174c-6.702 0-12.155 5.46-12.155 12.174zm-1.88 23.05c-1.454 3.5-5.466 5.147-8.953 3.694a6.84 6.84 0 0 1-3.524-3.362l3.957 1.64a5.04 5.04 0 0 0 6.591-2.719 5.05 5.05 0 0 0-2.715-6.601l-4.1-1.695c1.578-.6 3.372-.62 5.05.077 1.7.703 3 2.027 3.696 3.72s.692 3.56-.01 5.246M42.466 32.1a8.12 8.12 0 0 1-8.098-8.113 8.12 8.12 0 0 1 8.098-8.111 8.12 8.12 0 0 1 8.1 8.111 8.12 8.12 0 0 1-8.1 8.113m-6.068-8.126a6.09 6.09 0 0 1 6.08-6.095c3.355 0 6.084 2.73 6.084 6.095a6.09 6.09 0 0 1-6.084 6.093 6.09 6.09 0 0 1-6.081-6.093z"
+          fill="#FFFFFF"
+        />
+      </svg>
+    );
+  }
+  if (haystack.includes('torrent')) {
+    return (
+      <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="10.5" fill="#16A34A" fillOpacity="0.2" stroke="#4ADE80" strokeWidth="1.5" />
+        <path d="M12 6.5v8.25m0 0l-3.25-3.25M12 14.75l3.25-3.25M7.5 17.25h9" stroke="#4ADE80" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return <Gamepad2 className="w-4 h-4 text-[#A3E635] shrink-0" />;
+}
 
 interface GameRunnerModalProps {
   game: LauncherGame;
@@ -18,22 +60,56 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
   const [error, setError] = useState<string | null>(null);
   const [installedSubtitleVersion, setInstalledSubtitleVersion] = useState<string | null>(null);
   const [checkingVersion, setCheckingVersion] = useState(true);
+  const [removalInfo, setRemovalInfo] = useState<SubtitleRemovalInfo | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [launchMode, setLaunchMode] = useState<'subtitle' | 'dubbing'>(game.hasDubbing ? 'dubbing' : 'subtitle');
+  const [localDubInfo, setLocalDubInfo] = useState<{ installed: boolean; totalBytes: number } | null>(null);
+
+  const hasVariants = Array.isArray(game.variants) && game.variants.length >= 2;
+  const [selectedVariantKey, setSelectedVariantKey] = useState<string>(() => {
+    if (!hasVariants) return '';
+    const savedVar = localStorage.getItem(`subgame_variant_${game.id}`);
+    if (savedVar && game.variants!.some((v) => v.key === savedVar)) return savedVar;
+    return game.variants![0].key;
+  });
+  const [variantDetection, setVariantDetection] = useState<{
+    detectedKey: string | null;
+    results: Record<string, { matched: boolean; reasons: string[] }>;
+  } | null>(null);
+
+  const activeVariant = hasVariants
+    ? game.variants!.find((v) => v.key === selectedVariantKey) || game.variants![0]
+    : null;
+  const variantKey = activeVariant?.key;
+  const effectiveTargetFileName = activeVariant ? activeVariant.targetFileName : game.targetFileName;
+  const effectiveTargetRelativeDir = activeVariant
+    ? (activeVariant.targetRelativeDir ?? game.targetRelativeDir)
+    : game.targetRelativeDir;
+  const effectiveDownloadUrl = activeVariant ? activeVariant.subtitleDownloadUrl : game.subtitleDownloadUrl;
+  const effectiveSize = activeVariant?.subtitleSize || game.subtitleSize;
+  const effectiveExeName = activeVariant?.defaultExeName || game.defaultExeName;
 
   const isStandalone = Boolean(
     game.isStandalone ||
     game.skipSubtitleInjection ||
     game.id === 'level-devil' ||
     game.slug === 'level-devil' ||
-    !game.targetFileName
+    !effectiveTargetFileName
   );
 
-  const targetVersion = (game.version || '').trim();
-  const hasSubtitleUrl = Boolean(game.subtitleDownloadUrl && game.subtitleDownloadUrl.startsWith('http'));
+  const targetVersion = (activeVariant ? activeVariant.subtitleVersion : game.version || '').trim();
+  const hasSubtitleUrl = Boolean(effectiveDownloadUrl && effectiveDownloadUrl.startsWith('http'));
 
   // If game requires subtitles: verify whether current installed version equals the latest version
   const isSubtitleOutdated = !isStandalone && hasSubtitleUrl && Boolean(
     targetVersion && (!installedSubtitleVersion || installedSubtitleVersion !== targetVersion)
   );
+
+  const versionStorageKey = variantKey
+    ? `subgame_sub_version_${game.id}_${variantKey}`
+    : `subgame_sub_version_${game.id}`;
 
   useEffect(() => {
     // Load previously saved path if exists
@@ -48,11 +124,11 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
       let ver: string | null = null;
       try {
         if (window.subgame?.getSubtitleVersion) {
-          ver = await window.subgame.getSubtitleVersion(game.id);
+          ver = await window.subgame.getSubtitleVersion(game.id, variantKey);
         }
       } catch {}
       if (!ver) {
-        ver = localStorage.getItem(`subgame_sub_version_${game.id}`);
+        ver = localStorage.getItem(versionStorageKey);
       }
       if (isMounted) {
         setInstalledSubtitleVersion(ver || null);
@@ -61,7 +137,29 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     }
     checkInstalledVersion();
     return () => { isMounted = false; };
-  }, [game.id]);
+  }, [game.id, variantKey, versionStorageKey]);
+
+  useEffect(() => {
+    if (!hasVariants || !exePath || !window.subgame?.detectGameVariants) {
+      setVariantDetection(null);
+      return;
+    }
+    let isMounted = true;
+    window.subgame
+      .detectGameVariants(exePath, game.targetRelativeDir, game.variants!)
+      .then((res) => {
+        if (!isMounted) return;
+        setVariantDetection(res);
+        const hasSavedChoice = Boolean(localStorage.getItem(`subgame_variant_${game.id}`));
+        if (!hasSavedChoice && res?.detectedKey) {
+          setSelectedVariantKey(res.detectedKey);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setVariantDetection(null);
+      });
+    return () => { isMounted = false; };
+  }, [game.id, game.targetRelativeDir, game.variants, exePath, hasVariants]);
 
   useEffect(() => {
     // Subscribe to IPC status updates (supports both text string and 0-100% progress object)
@@ -98,6 +196,79 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     };
   }, []);
 
+  const buildSubtitleConfig = () => ({
+    gameId: game.id,
+    gameExePath: exePath,
+    targetSubtitleFileName: effectiveTargetFileName,
+    targetRelativeDir: effectiveTargetRelativeDir,
+    subtitleDownloadUrl: effectiveDownloadUrl,
+    subtitleVersion: targetVersion,
+    variantKey,
+    skipSubtitleInjection: Boolean(game.skipSubtitleInjection || !effectiveTargetFileName),
+    isAuthorized: true,
+    useDubbing: Boolean(game.hasDubbing && launchMode === 'dubbing'),
+    dubbingDownloadUrl: game.dubbingDownloadUrl,
+    dubbingVersion: game.dubbingVersion,
+  });
+
+  // Eski (1.4.5 gacha) main kodda bu IPC yo'q: tugma ko'rinmaydi
+  const canRemove = !isStandalone && Boolean(window.subgame?.getSubtitleRemovalInfo && window.subgame?.removeSubtitle);
+
+  const refreshRemovalInfo = async () => {
+    if (!canRemove) return null;
+    try {
+      const info = await window.subgame!.getSubtitleRemovalInfo!(buildSubtitleConfig());
+      setRemovalInfo(info?.success ? info : null);
+      return info;
+    } catch {
+      setRemovalInfo(null);
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    void refreshRemovalInfo();
+    if (game.hasDubbing && exePath && window.subgame?.checkLocalDubbing) {
+      window.subgame.checkLocalDubbing(game.id, exePath).then(setLocalDubInfo).catch(() => setLocalDubInfo(null));
+    } else {
+      setLocalDubInfo(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.id, exePath, installedSubtitleVersion, variantKey]);
+
+  const openRemoveConfirm = async () => {
+    setRemoveError(null);
+    setError(null);
+    setSuccessMessage(null);
+    await refreshRemovalInfo();
+    setConfirmRemove(true);
+  };
+
+  const handleRemoveSubtitles = async (cacheOnly = false) => {
+    if (!window.subgame?.removeSubtitle) return;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      const res = await window.subgame.removeSubtitle(buildSubtitleConfig(), { cacheOnly });
+      if (res?.success) {
+        try {
+          localStorage.removeItem(versionStorageKey);
+        } catch {}
+        setInstalledSubtitleVersion(null);
+        setConfirmRemove(false);
+        setSuccessMessage(res.message);
+        await refreshRemovalInfo();
+      } else {
+        setRemoveError(res?.message || 'Subtitrlarni o‘chirib bo‘lmadi.');
+        await refreshRemovalInfo();
+      }
+    } catch (err: any) {
+      setRemoveError(err?.message || 'Kutilmagan xatolik yuz berdi.');
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   const handleSelectExe = async () => {
     const selected = await window.subgame?.selectGameExecutable();
     if (selected) {
@@ -119,9 +290,33 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     }
   };
 
+  const activeDetection = activeVariant && variantDetection?.results?.[activeVariant.key];
+  const isVariantMismatch = Boolean(hasVariants && exePath && activeDetection && !activeDetection.matched);
+  const suggestedVariant =
+    isVariantMismatch && variantDetection?.detectedKey
+      ? game.variants!.find((v) => v.key === variantDetection.detectedKey) || null
+      : null;
+
+  const handleSelectVariant = (key: string) => {
+    setSelectedVariantKey(key);
+    try {
+      localStorage.setItem(`subgame_variant_${game.id}`, key);
+    } catch {}
+    setError(null);
+    setSuccessMessage(null);
+  };
+
   const handleInstallSubtitle = async () => {
     if (!exePath) {
-      setError(`Iltimos, avval o'yin ijro faylini (${game.defaultExeName}) tanlang.`);
+      setError(`Iltimos, avval o'yin ijro faylini (${effectiveExeName}) tanlang.`);
+      return;
+    }
+    if (isVariantMismatch && activeVariant) {
+      setError(
+        suggestedVariant
+          ? `Tanlangan "${activeVariant.label}" versiyasi o‘yin papkasiga mos kelmadi. Iltimos, "${suggestedVariant.label}" versiyasini tanlang.`
+          : `Tanlangan "${activeVariant.label}" versiyasi o‘yin papkasidagi fayllarga mos kelmadi.`
+      );
       return;
     }
 
@@ -133,22 +328,12 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     setStatusMessage("Subtitr tayyorlanmoqda...");
 
     try {
-      const skipInjection = Boolean(game.skipSubtitleInjection || !game.targetFileName);
-      const res = await window.subgame?.installSubtitle({
-        gameId: game.id,
-        gameExePath: exePath,
-        targetSubtitleFileName: game.targetFileName,
-        targetRelativeDir: game.targetRelativeDir,
-        subtitleDownloadUrl: game.subtitleDownloadUrl,
-        subtitleVersion: game.version,
-        skipSubtitleInjection: skipInjection,
-        isAuthorized: true,
-      });
+      const res = await window.subgame?.installSubtitle(buildSubtitleConfig());
 
       if (res?.success) {
         setInstalledSubtitleVersion(targetVersion);
         try {
-          localStorage.setItem(`subgame_sub_version_${game.id}`, targetVersion);
+          localStorage.setItem(versionStorageKey, targetVersion);
         } catch {}
         setSuccessMessage(res.message || `O‘zbekcha subtitr (${targetVersion}) muvaffaqiyatli ulandi! Endi o‘yinni boshlashingiz mumkin.`);
         setStatusMessage('');
@@ -173,7 +358,16 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
 
   const handleLaunch = async () => {
     if (!exePath) {
-      setError(`Iltimos, avval o'yin ijro faylini (${game.defaultExeName}) tanlang.`);
+      setError(`Iltimos, avval o'yin ijro faylini (${effectiveExeName}) tanlang.`);
+      return;
+    }
+
+    if (isVariantMismatch && activeVariant) {
+      setError(
+        suggestedVariant
+          ? `Tanlangan "${activeVariant.label}" versiyasi o‘yin papkasiga mos kelmadi. Iltimos, "${suggestedVariant.label}" versiyasini tanlang.`
+          : `Tanlangan "${activeVariant.label}" versiyasi o‘yin papkasidagi fayllarga mos kelmadi.`
+      );
       return;
     }
 
@@ -190,17 +384,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
     setStatusMessage('Boshlanmoqda...');
 
     try {
-      const skipInjection = Boolean(game.skipSubtitleInjection || !game.targetFileName);
-      const res = await window.subgame?.launchGame({
-        gameId: game.id,
-        gameExePath: exePath,
-        targetSubtitleFileName: game.targetFileName,
-        targetRelativeDir: game.targetRelativeDir,
-        subtitleDownloadUrl: game.subtitleDownloadUrl,
-        subtitleVersion: game.version,
-        skipSubtitleInjection: skipInjection,
-        isAuthorized: true,
-      });
+      const res = await window.subgame?.launchGame(buildSubtitleConfig());
 
       if (!res?.success) {
         setError(res?.message || "O'yinni ishga tushirishda xatolik yuz berdi");
@@ -299,7 +483,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
                 setError(null);
                 setSuccessMessage(null);
               }}
-              placeholder={`Masalan: C:\\Games\\${game.title}\\${game.defaultExeName}`}
+              placeholder={`Masalan: C:\\Games\\${game.title}\\${effectiveExeName}`}
               className="flex-1 px-3.5 py-2.5 bg-[#0B0D12] border border-[#2A3245] rounded-xl text-xs text-gray-200 focus:outline-none focus:border-[#A3E635] font-mono truncate"
             />
             <button
@@ -312,7 +496,7 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
           </div>
           <div className="flex items-center justify-between text-[11px] text-gray-400">
             <span>
-              O‘rnatilgan papkadagi <code className="text-[#A3E635] font-mono">{game.defaultExeName}</code> faylini ko‘rsating.
+              O‘rnatilgan papkadagi <code className="text-[#A3E635] font-mono">{effectiveExeName}</code> faylini ko‘rsating.
             </span>
             <button
               type="button"
@@ -324,13 +508,143 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
           </div>
         </div>
 
+        {/* Game Variant Selector (Torrent / Steam / ...) */}
+        {hasVariants && (
+          <div className="mb-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                Qaysi versiyangiz bor?
+              </span>
+              {activeVariant && (
+                <span className="text-[10px] text-gray-400">
+                  Tanlangan: <span className="text-[#A3E635] font-semibold">{activeVariant.label}</span>
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {game.variants!.map((v) => {
+                const isSelected = activeVariant?.key === v.key;
+                const isDetected = variantDetection?.detectedKey === v.key;
+                return (
+                  <button
+                    key={v.key}
+                    type="button"
+                    onClick={() => handleSelectVariant(v.key)}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#A3E635]/15 border-[#A3E635]'
+                        : 'bg-[#141821] border-[#2A3245] hover:border-gray-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1 text-xs font-bold text-white">
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        {renderVariantIcon(v.key, v.label)}
+                        <span className="truncate">{v.label}</span>
+                      </span>
+                      {v.subtitleSize && (
+                        <span className="font-mono text-[10px] text-gray-400 shrink-0">{v.subtitleSize}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-1 mt-0.5">
+                      <span className="text-[10px] font-mono text-gray-400">{v.subtitleVersion}</span>
+                      {isDetected && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          Aniqlangan
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {isVariantMismatch && activeVariant && (
+              <div className="p-3 bg-rose-500/10 border border-rose-500/40 rounded-xl text-xs text-rose-200 space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-rose-300">
+                      Tanlangan "{activeVariant.label}" versiyasi o‘yin papkasiga mos kelmadi!
+                    </p>
+                  </div>
+                </div>
+                {suggestedVariant && (
+                  <button
+                    type="button"
+                    onClick={() => handleSelectVariant(suggestedVariant.key)}
+                    className="w-full py-1.5 px-3 rounded-lg bg-[#A3E635] hover:bg-[#84CC16] text-[#0B0D12] text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    "{suggestedVariant.label}" versiyasiga o‘tish
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Dubbing & Subtitle Mode Selector */}
+        {game.hasDubbing && (
+          <div className="mb-4 space-y-2">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-gray-400">
+              O‘zbekcha paket tanlovi:
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setLaunchMode('subtitle')}
+                className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                  launchMode === 'subtitle'
+                    ? 'bg-[#A3E635]/15 border-[#A3E635]'
+                    : 'bg-[#141821] border-[#2A3245] hover:border-gray-500'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-bold text-white">
+                  <span className="flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-[#A3E635]" />
+                    Subtitr
+                  </span>
+                  <span className="font-mono text-[10px] text-gray-400">{game.subtitleSize}</span>
+                </div>
+                <span className="block text-[10px] text-gray-400 mt-0.5">Faqat matn tarjimasi</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setLaunchMode('dubbing')}
+                className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                  launchMode === 'dubbing'
+                    ? 'bg-violet-500/20 border-violet-400'
+                    : 'bg-[#141821] border-[#2A3245] hover:border-gray-500'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-bold text-white">
+                  <span className="flex items-center gap-1.5">
+                    <Mic className="w-3.5 h-3.5 text-violet-400" />
+                    Dublyaj + Subtitr
+                  </span>
+                  <span className="font-mono text-[10px] text-violet-300">{game.dubbingSize || '1.16 GB'}</span>
+                </div>
+                <span className="block text-[10px] text-violet-300/90 mt-0.5">
+                  {localDubInfo?.installed
+                    ? 'O‘rnatilgan (Tayyor)'
+                    : 'O‘zbekcha ovoz + matn'}
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Protection / Status Notice */}
         <div className="p-3 bg-[#141821] border border-[#2A3245] rounded-xl text-xs text-gray-300 flex items-center justify-between gap-2.5 mb-5">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-[#A3E635] shrink-0" />
             <span>
               Lokalizatsiya: <span className="text-[#A3E635] font-semibold">To‘liq o‘zbekcha</span>
-              {game.isStandalone ? ' (Mustaqil o‘yin)' : ` (${game.subtitleSize})`}
+              {game.isStandalone
+                ? ' (Mustaqil o‘yin)'
+                : game.hasDubbing && launchMode === 'dubbing'
+                  ? ` (${game.dubbingSize || '1.16 GB'})`
+                  : ` (${effectiveSize})`}
             </span>
           </div>
           {game.isStandalone || game.skipSubtitleInjection ? (
@@ -347,6 +661,22 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
             </span>
           )}
         </div>
+
+        {canRemove && removalInfo && !removalInfo.nothingToRemove && !launching && !installing && (
+          <div className="flex items-center justify-between gap-2 -mt-3 mb-5 px-1 text-[11px] text-gray-400">
+            <span>
+              Subtitrlar kompyuteringizda <span className="text-gray-200 font-semibold">{formatSize(removalInfo.totalBytes)}</span> joy egallagan.
+            </span>
+            <button
+              type="button"
+              onClick={openRemoveConfirm}
+              className="text-rose-300 hover:text-rose-200 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
+              title="O‘zbekcha subtitrlarni kompyuterdan o‘chirish (litsenziya saqlanadi)"
+            >
+              <Trash2 className="w-3 h-3" /> O‘chirish
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="flex items-center gap-2 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs mb-4">
@@ -461,6 +791,107 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
             </button>
           )}
         </div>
+
+        {confirmRemove && removalInfo && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center p-5 bg-[#0B0D12]/90 backdrop-blur-sm">
+            <div className="w-full bg-[#1A1F2A] border border-rose-500/40 rounded-2xl p-5 shadow-modal">
+              <div className="flex items-center gap-2.5 mb-3">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center">
+                  <Trash2 className="w-4 h-4 text-rose-300" />
+                </div>
+                <h4 className="text-base font-bold text-[#F5F7FA]">O‘zbekcha subtitrlarni o‘chirish</h4>
+              </div>
+
+              <p className="text-xs text-gray-300 mb-3">
+                <span className="font-semibold text-gray-100">{game.title}</span> uchun quyidagilar o‘chiriladi:
+              </p>
+              <ul className="text-xs text-gray-300 space-y-1.5 mb-3">
+                {removalInfo.cacheBytes > 0 && (
+                  <li className="flex justify-between gap-3">
+                    <span>• Launcher yuklab olgan subtitr paketi</span>
+                    <span className="font-mono text-gray-100 shrink-0">{formatSize(removalInfo.cacheBytes)}</span>
+                  </li>
+                )}
+                {removalInfo.gameFolderFound && removalInfo.gameFolderItems > 0 && (
+                  <li className="flex justify-between gap-3">
+                    <span>• O‘yin papkasidagi launcher fayllari ({removalInfo.gameFolderItems} ta), asl fayllar tiklanadi</span>
+                    <span className="font-mono text-gray-100 shrink-0">{formatSize(removalInfo.gameFolderBytes)}</span>
+                  </li>
+                )}
+              </ul>
+              <div className="flex justify-between text-xs font-bold text-[#F5F7FA] border-t border-[#2A3245] pt-2.5 mb-3">
+                <span>Bo‘shaydigan joy</span>
+                <span className="font-mono text-[#A3E635]">{formatSize(removalInfo.totalBytes)}</span>
+              </div>
+
+              <p className="text-[11px] text-gray-400 mb-3 leading-relaxed">
+                O‘yinning o‘z fayllariga tegilmaydi. Litsenziyangiz shu kompyuterda saqlanib qoladi: keyinroq qayta o‘rnatish uchun yana to‘lash shart emas.
+              </p>
+
+              {removalInfo.gameRunning && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-amber-500/10 border border-amber-500/40 rounded-xl text-amber-200 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>O‘yin hozir ochiq. Avval o‘yinni to‘liq yoping, keyin o‘chiring.</span>
+                </div>
+              )}
+              {!removalInfo.gameRunning && removalInfo.filesLocked && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-amber-500/10 border border-amber-500/40 rounded-xl text-amber-200 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>Ba’zi subtitr fayllari band: o‘yin yoki boshqa dastur ularni ishlatmoqda. O‘yinni (va Steam/Epic launcherini) yopib, qaytadan oching.</span>
+                </div>
+              )}
+              {!removalInfo.gameFolderFound && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-amber-500/10 border border-amber-500/40 rounded-xl text-amber-200 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>
+                    O‘yin papkasi topilmadi. O‘yinni boshqa joyga ko‘chirgan bo‘lsangiz, avval yangi joydagi {game.defaultExeName} faylini tanlang. O‘yin o‘chirilgan bo‘lsa, faqat launcher yuklab olgan fayllar o‘chiriladi.
+                  </span>
+                </div>
+              )}
+              {removalInfo.gameFolderFound && removalInfo.needsVerify && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-[#141821] border border-[#2A3245] rounded-xl text-gray-300 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-300" />
+                  <span>Ba’zi fayllarning asl nusxasi saqlanmagan. O‘chirgandan keyin o‘yin ishlamasa, Steam/Epic’da o‘yin fayllarini tekshiring.</span>
+                </div>
+              )}
+
+              {removeError && (
+                <div className="flex items-start gap-2 p-2.5 mb-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-[11px]">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-400" />
+                  <span>{removeError}</span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setConfirmRemove(false)}
+                  disabled={removing}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-[#141821] hover:bg-white/10 text-gray-300 text-xs font-semibold border border-[#2A3245] transition-all cursor-pointer disabled:opacity-50"
+                >
+                  Bekor qilish
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveSubtitles(!removalInfo.gameFolderFound)}
+                  disabled={removing || removalInfo.gameRunning || Boolean(removalInfo.filesLocked)}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {removing ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> O‘chirilmoqda...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {removalInfo.gameFolderFound ? 'O‘chirish' : 'Faqat yuklangan fayllarni o‘chirish'}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

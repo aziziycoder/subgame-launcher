@@ -6,7 +6,8 @@ import http from 'http';
 import { spawn } from 'child_process';
 import { getHardwareId } from './hwid';
 import { loadLicenseStore, activateLicense } from './license';
-import { launchGameWithProtection, injectSubtitleFile } from './gameRunner';
+import { launchGameWithProtection, injectSubtitleFile, getSubtitleCacheDir, evaluateVariantRules } from './gameRunner';
+import { getSubtitleRemovalInfo, removeSubtitles } from './subtitleRemover';
 import { compareSemver, verifyPatchDir, readBlockedPatchVersions } from './patchVerify';
 
 let mainWindow: BrowserWindow | null = null;
@@ -227,16 +228,46 @@ ipcMain.handle('install-subtitle', async (_, config) => {
   });
 });
 
-// IPC: Get Installed Subtitle Version for a Game
-ipcMain.handle('get-subtitle-version', (_, gameId: string) => {
+// IPC: O'chirishdan oldin nima o'chishi va qancha joy bo'shashini ko'rsatish
+ipcMain.handle('get-subtitle-removal-info', (_, config) => getSubtitleRemovalInfo(config));
+
+// IPC: O'zbekcha subtitrlarni kompyuterdan olib tashlash (litsenziya saqlanadi)
+ipcMain.handle('remove-subtitle', (_, config, options?: { cacheOnly?: boolean }) =>
+  removeSubtitles(config, Boolean(options?.cacheOnly))
+);
+
+// IPC: Get Installed Subtitle Version for a Game (and optional variant)
+ipcMain.handle('get-subtitle-version', (_, gameId: string, variantKey?: string) => {
   try {
     if (!gameId) return null;
-    const versionFile = path.join(app.getPath('userData'), 'subtitles', gameId, 'version.txt');
+    const versionFile = path.join(getSubtitleCacheDir(gameId, variantKey), 'version.txt');
     if (fs.existsSync(versionFile)) {
       return fs.readFileSync(versionFile, 'utf8').trim();
     }
   } catch {}
   return null;
+});
+
+// IPC: Detect matching game variant from game folder
+ipcMain.handle('detect-game-variants', (_, exePath: string, targetRelativeDir: string | undefined, variants: any[]) => {
+  return evaluateVariantRules(exePath, targetRelativeDir, variants);
+});
+
+// IPC: Check if local dubbing files are present in the game folder
+ipcMain.handle('check-local-dubbing', async (_, gameId: string, exePath: string) => {
+  try {
+    if (!exePath || !fs.existsSync(exePath)) {
+      return { installed: false, totalBytes: 0 };
+    }
+    const gameDir = fs.statSync(exePath).isFile() ? path.dirname(exePath) : exePath;
+    const markerPath = path.join(gameDir, '.subgame_dub_version');
+    if (fs.existsSync(markerPath)) {
+      return { installed: true, totalBytes: 0 };
+    }
+    return { installed: false, totalBytes: 0 };
+  } catch {
+    return { installed: false, totalBytes: 0 };
+  }
 });
 
 // IPC: Open Game Folder in Explorer
