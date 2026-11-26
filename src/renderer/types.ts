@@ -61,6 +61,7 @@ export interface SubGameApi {
   getSubtitleRemovalInfo?: (config: SubtitleConfig) => Promise<SubtitleRemovalInfo>;
   removeSubtitle?: (config: SubtitleConfig, options?: { cacheOnly?: boolean }) => Promise<SubtitleRemovalResult>;
   getSubtitleVersion: (gameId: string) => Promise<string | null>;
+  checkLocalDubbing?: (gameId: string, exePath: string) => Promise<{ installed: boolean; totalBytes: number }>;
   onStatusUpdate: (callback: (status: any) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
   openExternal: (url: string) => void;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, FolderOpen, AlertCircle, X, CheckCircle2, Loader2, Sparkles, Globe, DownloadCloud, ExternalLink, ShieldCheck, Trash2 } from 'lucide-react';
+import { Play, FolderOpen, AlertCircle, X, CheckCircle2, Loader2, Sparkles, Globe, DownloadCloud, ExternalLink, ShieldCheck, Trash2, Mic, FileText } from 'lucide-react';
 import { LauncherGame } from '../data/launcherGames';
 import type { SubtitleRemovalInfo } from '../types';
 
@@ -30,6 +30,8 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [launchMode, setLaunchMode] = useState<'subtitle' | 'dubbing'>(game.hasDubbing ? 'dubbing' : 'subtitle');
+  const [localDubInfo, setLocalDubInfo] = useState<{ installed: boolean; totalBytes: number } | null>(null);
 
   const isStandalone = Boolean(
     game.isStandalone ||
@@ -138,6 +140,11 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
 
   useEffect(() => {
     void refreshRemovalInfo();
+    if (game.hasDubbing && exePath && window.subgame?.checkLocalDubbing) {
+      window.subgame.checkLocalDubbing(game.id, exePath).then(setLocalDubInfo).catch(() => setLocalDubInfo(null));
+    } else {
+      setLocalDubInfo(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.id, exePath, installedSubtitleVersion]);
 
@@ -400,13 +407,69 @@ export const GameRunnerModal: React.FC<GameRunnerModalProps> = ({ game, onClose 
           </div>
         </div>
 
+        {/* Dubbing & Subtitle Mode Selector */}
+        {game.hasDubbing && (
+          <div className="mb-4 space-y-2">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-gray-400">
+              O‘zbekcha paket tanlovi:
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setLaunchMode('subtitle')}
+                className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                  launchMode === 'subtitle'
+                    ? 'bg-[#A3E635]/15 border-[#A3E635]'
+                    : 'bg-[#141821] border-[#2A3245] hover:border-gray-500'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-bold text-white">
+                  <span className="flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-[#A3E635]" />
+                    Subtitr
+                  </span>
+                  <span className="font-mono text-[10px] text-gray-400">{game.subtitleSize}</span>
+                </div>
+                <span className="block text-[10px] text-gray-400 mt-0.5">Faqat matn tarjimasi</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setLaunchMode('dubbing')}
+                className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                  launchMode === 'dubbing'
+                    ? 'bg-violet-500/20 border-violet-400'
+                    : 'bg-[#141821] border-[#2A3245] hover:border-gray-500'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-bold text-white">
+                  <span className="flex items-center gap-1.5">
+                    <Mic className="w-3.5 h-3.5 text-violet-400" />
+                    Dublyaj + Subtitr
+                  </span>
+                  <span className="font-mono text-[10px] text-violet-300">{game.dubbingSize || '1.16 GB'}</span>
+                </div>
+                <span className="block text-[10px] text-violet-300/90 mt-0.5">
+                  {localDubInfo?.installed
+                    ? `Tayyor (${formatSize(localDubInfo.totalBytes)})`
+                    : 'O‘zbekcha ovoz + matn'}
+                </span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Protection / Status Notice */}
         <div className="p-3 bg-[#141821] border border-[#2A3245] rounded-xl text-xs text-gray-300 flex items-center justify-between gap-2.5 mb-5">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-[#A3E635] shrink-0" />
             <span>
               Lokalizatsiya: <span className="text-[#A3E635] font-semibold">To‘liq o‘zbekcha</span>
-              {game.isStandalone ? ' (Mustaqil o‘yin)' : ` (${game.subtitleSize})`}
+              {game.isStandalone
+                ? ' (Mustaqil o‘yin)'
+                : game.hasDubbing && launchMode === 'dubbing'
+                  ? ` (${game.dubbingSize || '1.16 GB'})`
+                  : ` (${game.subtitleSize})`}
             </span>
           </div>
           {game.isStandalone || game.skipSubtitleInjection ? (

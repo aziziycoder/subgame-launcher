@@ -73,6 +73,13 @@ function mapRawGameToLauncherGame(data: any, fallbackId?: string): LauncherGame 
   const rawSubUrl = data.subtitleDownloadUrl || data.subtitle_download_url;
   const subUrl = rawSubUrl && rawSubUrl.startsWith('http') ? rawSubUrl : undefined;
 
+  const hasDubbing = Boolean(data.hasDubbing || data.has_dubbing);
+  const dubbingSize = field(data.dubbingSize, data.dubbing_size);
+  const dubbingPrice = field(data.dubbingPrice, data.dubbing_price) || (hasDubbing ? 'Bepul' : undefined);
+  const dubbingVersion = field(data.dubbingVersion, data.dubbing_version) || (hasDubbing ? 'v1.0.0' : undefined);
+  const rawDubUrl = data.dubbingDownloadUrl || data.dubbing_download_url;
+  const dubbingDownloadUrl = rawDubUrl && rawDubUrl.startsWith('http') ? rawDubUrl : undefined;
+
   return {
     id,
     slug: data.slug || id,
@@ -95,6 +102,11 @@ function mapRawGameToLauncherGame(data: any, fallbackId?: string): LauncherGame 
     subtitleDownloadUrl: isStandalone ? undefined : subUrl,
     isStandalone,
     skipSubtitleInjection: isStandalone,
+    hasDubbing,
+    dubbingSize,
+    dubbingPrice,
+    dubbingVersion,
+    dubbingDownloadUrl,
   };
 }
 

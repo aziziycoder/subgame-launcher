@@ -47,6 +47,7 @@ export interface SubGameApi {
     options?: { cacheOnly?: boolean }
   ) => Promise<SubtitleRemovalResultPayload>;
   getSubtitleVersion: (gameId: string) => Promise<string | null>;
+  checkLocalDubbing: (gameId: string, exePath: string) => Promise<{ installed: boolean; totalBytes: number }>;
   onStatusUpdate: (callback: (status: any) => void) => () => void;
   windowControl: (action: 'minimize' | 'maximize' | 'close') => void;
   openExternal: (url: string) => void;
@@ -68,6 +69,7 @@ const api: SubGameApi = {
   getSubtitleRemovalInfo: (config) => ipcRenderer.invoke('get-subtitle-removal-info', config),
   removeSubtitle: (config, options) => ipcRenderer.invoke('remove-subtitle', config, options),
   getSubtitleVersion: (gameId: string) => ipcRenderer.invoke('get-subtitle-version', gameId),
+  checkLocalDubbing: (gameId: string, exePath: string) => ipcRenderer.invoke('check-local-dubbing', gameId, exePath),
   onStatusUpdate: (callback) => {
     const handler = (_: any, status: string) => callback(status);
     ipcRenderer.on('game-status', handler);

@@ -202,7 +202,8 @@ export function App() {
     // 3. Check if user already owns this game, preferring fresh data over the cached list
     setDeviceBindingLoading(true);
     const freshLicenses = await refreshLicenses();
-    const cloudLic = (freshLicenses || cloudLicenses)[game.id];
+    const allLicenses = freshLicenses || cloudLicenses;
+    const cloudLic = allLicenses[game.id] || allLicenses[`${game.id}__dub`];
     if (!cloudLic || cloudLic.status !== 'active') {
       setDeviceBindingLoading(false);
       // User must first claim or purchase the game from the official website!

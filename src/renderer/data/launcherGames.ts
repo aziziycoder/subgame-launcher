@@ -20,6 +20,11 @@ export interface LauncherGame {
   subtitleDownloadUrl?: string;
   isStandalone?: boolean;
   skipSubtitleInjection?: boolean;
+  hasDubbing?: boolean;
+  dubbingSize?: string;
+  dubbingPrice?: string;
+  dubbingVersion?: string;
+  dubbingDownloadUrl?: string;
 }
 
 /**

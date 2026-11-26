@@ -248,6 +248,35 @@ ipcMain.handle('get-subtitle-version', (_, gameId: string) => {
   return null;
 });
 
+// IPC: Check if local dubbing files are present in the game folder
+ipcMain.handle('check-local-dubbing', async (_, gameId: string, exePath: string) => {
+  try {
+    if (!exePath || !fs.existsSync(exePath)) {
+      return { installed: false, totalBytes: 0 };
+    }
+    const gameDir = fs.statSync(exePath).isFile() ? path.dirname(exePath) : exePath;
+    if (gameId === 'need-for-speed-most-wanted') {
+      const copBig = path.join(gameDir, 'SOUND', 'SPEECH', 'copspeech.big');
+      const moviesDir = path.join(gameDir, 'MOVIES');
+      let totalBytes = 0;
+      let hasMovies = false;
+      if (fs.existsSync(copBig)) totalBytes += fs.statSync(copBig).size;
+      if (fs.existsSync(moviesDir)) {
+        for (const f of fs.readdirSync(moviesDir)) {
+          if (f.endsWith('_russian_pal.vp6')) {
+            hasMovies = true;
+            totalBytes += fs.statSync(path.join(moviesDir, f)).size;
+          }
+        }
+      }
+      return { installed: hasMovies && fs.existsSync(copBig), totalBytes };
+    }
+    return { installed: false, totalBytes: 0 };
+  } catch {
+    return { installed: false, totalBytes: 0 };
+  }
+});
+
 // IPC: Open Game Folder in Explorer
 ipcMain.handle('open-game-folder', async (_, exePath: string) => {
   if (exePath) {
